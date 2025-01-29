@@ -1,0 +1,187 @@
+<html>
+
+<head>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-DNCTB274ZB"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-DNCTB274ZB');
+    </script>
+    <meta charset="utf-8">
+    <meta http-equiv="Cache-Control" content="no-cache">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        @font-face {
+            font-family: linkor-even;
+            src: url('linear-korean-even.woff2') format('woff2')
+        }
+        @font-face {
+            font-family: linkor-updot;
+            src: url('linear-korean-unicode-updot.woff2') format('woff2')
+        }
+        @font-face {
+            font-family: linkor-jong-underbar-even;
+            src: url('linear-korean-jong-underbar-even.woff2') format('woff2')
+        }
+        @font-face {
+            font-family: linkor-jong-underdot-even;
+            src: url('linear-korean-jong-underdot-even.woff2') format('woff2')
+        }
+        @font-face {
+            font-family: linkor-all-underbar-even;
+            src: url('linear-korean-all-underbar-even.woff2') format('woff2')
+        }
+        @font-face {
+            font-family: linkor-all-underbar-seven;
+            src: url('linear-korean-all-underbar-seven.woff2') format('woff2')
+        }
+        @font-face {
+            font-family: linkor-jong-underdot-seven;
+            src: url('linear-korean-jong-underdot-seven.woff2') format('woff2')
+        }
+        @font-face {
+            font-family: linkor-jong-underbar-seven;
+            src: url('linear-korean-jong-underbar-seven.woff2') format('woff2')
+        }
+        @font-face {
+            font-family: linkor-all-seven;
+            src: url('linear-korean-all-seven.woff2') format('woff2')
+        }
+        #input {
+            font-family: gulim;
+            font-size: 1.0em;
+            overflow: auto;
+            width: calc(50% - 60px);
+            height: 300px;
+        }
+        #output {
+            font-size: 1.0em;
+            overflow: auto;
+            width: calc(50% - 60px);
+            height: 300px;
+        }
+        #convert_btn {
+            width: 100px;
+            vertical-align: top;
+        }
+        .linkor-jong-underbar-even {
+            font-family: linkor-jong-underbar-even;
+            font-weight: regular;
+        }
+        .linkor-even {
+            font-family: linkor-even;
+            font-weight: regular;
+        }
+        .linkor-updot {
+            font-family: linkor-updot;
+            font-weight: regular;
+        }
+        .linkor-jong-underdot-even {
+            font-family: linkor-jong-underdot-even;
+            font-weight: regular;
+        }
+        .linkor-all-underbar-even {
+            font-family: linkor-all-underbar-even;
+            font-weight: regular;
+        }
+        .linkor-jong-underdot-seven {
+            font-family: linkor-jong-underdot-seven;
+            font-weight: regular;
+        }
+        .linkor-jong-underbar-seven {
+            font-family: linkor-jong-underbar-seven;
+            font-weight: regular;
+        }
+        .linkor-all-underbar-seven {
+            font-family: linkor-all-underbar-seven;
+            font-weight: regular;
+        }
+        .linkor-all-seven {
+            font-family: linkor-all-seven;
+            font-weight: regular;
+        }
+        table {
+            border-collapse: collapse;
+            border: 1px solid black;
+        }
+        table td {
+            border: 1px solid black;
+        }
+        .paragraph {
+            margin-bottom: 1rem;
+        }
+        body {
+            margin: 1.5rem;
+            font-size: 1.2em;
+        }
+        .content_area {
+            width: 100%;
+        }
+        .content_area textarea {
+            width: 100%;
+            height: 400px;
+            font-size: 1.5rem;
+        }
+        .test_area {
+            width: 100%;
+        }
+        .test_area textarea {
+            justify-self: stretch;
+        }
+        .big_button {
+            font-size: 1.6em;
+            padding: 1rem;
+            border-radius: 1rem;
+            background-color: #00BFFF;
+        }
+        .big_button a {
+            text-decoration: none;
+            color: black;
+        }
+    </style>
+    <title>한글 풀어쓰기 폰트 데모</title>
+</head>
+
+<body>
+    <h1>한글 풀어쓰기 폰트 데모 Linear Hangul Demo</h1>
+    <div class="paragraph">한글 풀어쓰기를 테스트해 보세요. Test linear Hangul systems.</div>
+    <div class="paragraph">어느 창이든 수정 가능하며 모든 창이 업데이트 됩니다. You can type in any window and all windows will be updated.</div>
+</div>
+<div class="content_area" x-data="{ message: '나라말이 중국과 달라, 한문 한자와 서로 통하지 아니하므로, 어리석은 백성들이 말하고자 하는 바가 있어도, 끝내 제 뜻을 펴지 못하는 사람이 많다. 내가 이를 불쌍히 여겨, 새로 스물 여덟 글자를 만드니, 사람마다 하여금 쉽게 익혀, 날마다 씀에 편하게 하고자 할 따름이다.\n\n동해 물과 백두산이 마르고 닳도록 하느님이 보우하사 우리나라 만세. 무궁화 삼천리 화려 강산 대한 사람, 대한으로 길이 보전하세.\n\n우리는 민족중흥의 역사적 사명을 띠고 이 땅에 태어났다. 조상의 빛난 얼을 오늘에 되살려 안으로 자주독립의 자세를 확립하고 밖으로 인류공영에 이바지할 때다. 이에 우리의 나아갈 바를 밝혀 교육의 지표로 삼는다. 성실한 마음과 튼튼한 몸으로 학문과 기술을 배우고 익히며 타고난 저마다의 소질을 계발하고 우리의 처지를 약진의 발판으로 삼아 창조의 힘과 개척의 정신을 기른다. 공익과 질서를 앞세우며 능률과 실질을 숭상하고 경애와 신의에 뿌리박은 상부상조의 전통을 이어받아 명랑하고 따뜻한 협동정신을 북돋운다. 우리의 창의와 협력을 바탕으로 나라가 발전하며 나라의 융성이 나의 발전임을 깨달아 자유와 권리에 따르는 책임과 의무를 다하여 스스로 국가건설에 참여하고 봉사하는 국민정신을 드높인다. 반공민주정신에 투철한 애국애족이 우리의 삶의 길이며 자유세계의 이상을 실현하는 기반이다. 길이 후손에 물려줄 영광된 통일조국의 앞날을 내다보며 신념과 긍지를 지닌 근면한 국민으로서 민족의 슬기를 모아 줄기찬 노력으로 새 역사를 창조하자.' }">
+    <div class="test_area">
+        <textarea x-model="message"></textarea>
+        <h2>Even</h2>
+        <textarea class='linkor-even' x-model="message"></textarea>
+        <h2>Jong Underdot Even</h2>
+        <textarea class='linkor-jong-underdot-even' x-model="message"></textarea>
+        <h2>Jong Underbar Even</h2>
+        <textarea class='linkor-jong-underbar-even' x-model="message"></textarea>
+        <h2>All Underbar Even</h2>
+        <textarea class='linkor-all-underbar-even' x-model="message"></textarea>
+        <h2>70%</h2>
+        <textarea class='linkor-all-seven' x-model="message"></textarea>
+        <h2>Jong Underdot 70%</h2>
+        <textarea class='linkor-jong-underdot-seven' x-model="message"></textarea>
+        <h2>Jong Underbar 70%</h2>
+        <textarea class='linkor-jong-underbar-seven' x-model="message"></textarea>
+        <h2>All Underbar 70%</h2>
+        <textarea class='linkor-all-underbar-seven' x-model="message"></textarea>
+        <h2>Updot</h2>
+        <textarea class='linkor-updot' x-model="message"></textarea>
+    </div>
+</div>
+<div class="paragraph">한글 풀어쓰기 폰트는 개인적 사용과 배포는 자유롭게 허용되나 단체적 사용과 상업적 사용은 라이선스의 획득이 필요합니다. You can use the font for personal use and distribution, but you need a license for group and commercial use.</div>
+<div class="paragraph">
+    <button class="big_button">
+        <a href="mailto:info@bukdugroup.com?subject=한글 풀어쓰기 폰트 사용 문의 / 피드백">한글 풀어쓰기 폰트 사용 문의 / 피드백</a>
+    </button>
+</div>
+<hr />
+<div>
+    Copyright 2025 Bukdu Group, LLC
+</div>
+</body>
+</html>

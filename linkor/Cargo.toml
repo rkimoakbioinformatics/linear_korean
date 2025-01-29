@@ -1,0 +1,17 @@
+[package]
+name = "linkor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fonttools = "0"
+ahash = "*"
+lazy_static = "*"
+clap = { version = "*", features = ["derive"] }
+kurbo = "*"
+write-fonts = { version="*", features=["read"] }
+iced = { version="*", features=["advanced"] }
+iced_graphics = "*"
+chrono = "*"
+json5 = "*"
+serde_json = "*"

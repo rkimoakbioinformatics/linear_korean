@@ -1,0 +1,15 @@
+pub mod a;
+pub mod ae;
+pub mod ya;
+pub mod yae;
+pub mod eo;
+pub mod eoe;
+pub mod yeo;
+pub mod yeoe;
+pub mod o;
+pub mod yo;
+pub mod u;
+pub mod yu;
+pub mod eui;
+pub mod i;
+pub mod are_a;

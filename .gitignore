@@ -1,0 +1,6 @@
+target
+*.ttf
+*.woff2
+*.woff
+*.otf
+.DS_Store
