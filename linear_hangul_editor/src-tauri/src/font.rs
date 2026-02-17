@@ -50,6 +50,11 @@ pub fn collect_glyphs(
         }
         if created_glyphs.contains_key(&codepoint) {
             let g = created_glyphs.get(&codepoint).unwrap();
+            if codepoint == 32 && args.space_width.is_some() {
+                font_tables.hmtx.h_metrics[glyph_id].advance = args.space_width.unwrap();
+                font_tables.glyphs.push(g.clone());
+                continue;
+            }
             let mut bbox = g.bbox().unwrap();
             if bbox.x_max == 0 {
                 bbox.x_max = (args.space_width_ratio * args.glyph_width as f32) as i16;
@@ -539,6 +544,7 @@ pub fn get_font_tables_and_builder<'a>(
     font_bytes: &'a [u8],
     glyph_set: &str,
 ) -> Result<(FontTables, FontBuilder<'a>), Error> {
+    let args = &*CONFIG.read().unwrap();
     let mut builder = FontBuilder::default();
     let mut font_tables = get_initial_font_tables();
     let created_glyphs = crate::glyph::create_glyphs(glyph_set)?;
@@ -604,6 +610,13 @@ pub fn get_font_tables_and_builder<'a>(
                 .codepoint_to_glyph_id
                 .insert(*codepoint, glyph_id as u16);
             let glyph = created_glyphs.get(codepoint).unwrap();
+            if *codepoint == 32 && args.space_width.is_some() {
+                font_tables.hmtx.h_metrics.push(LongMetric {
+                    advance: args.space_width.unwrap(),
+                    side_bearing: 0,
+                });
+                continue;
+            }
             let bbox = glyph.bbox();
             let bbox = bbox.as_ref().unwrap();
             font_tables.hmtx.h_metrics.push(LongMetric {

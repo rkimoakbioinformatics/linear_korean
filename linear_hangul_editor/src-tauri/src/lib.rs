@@ -134,6 +134,9 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
         if config.min_gap.is_none() {
             config.min_gap = in_config.min_gap;
         }
+        if config.space_width.is_none() {
+            config.space_width = in_config.space_width;
+        }
     }
     let source_filename: Option<String> = match &config.source {
         Some(v) => {
@@ -260,6 +263,7 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
     let sw_ratio: f32 = config.sw_ratio.unwrap();
     let sw: i16 = (sw_ratio * glyph_width as f32) as i16;
     let kerning_data: KerningMap = get_kerning_map(kerning_name)?;
+    let space_width: Option<u16> = config.space_width;
     let space_width_ratio: f32 = config.space_width_ratio.unwrap();
     Ok(Args {
         source_filename,
@@ -287,6 +291,7 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
         cap_height,
         min_gap,
         kerning_data,
+        space_width,
         space_width_ratio,
     })
 }

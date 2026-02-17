@@ -51,6 +51,7 @@ pub struct Args {
     pub glyph_width: i16,
     pub min_gap: i16,
     pub kerning_data: crate::KerningMap,
+    pub space_width: Option<u16>,
     pub space_width_ratio: f32,
 }
 
@@ -78,6 +79,7 @@ pub struct Config {
     pub x_height: Option<i16>,
     pub baseline: Option<i16>,
     pub min_gap: Option<i16>,
+    pub space_width: Option<u16>,
     pub space_width_ratio: Option<f32>,
 }
 

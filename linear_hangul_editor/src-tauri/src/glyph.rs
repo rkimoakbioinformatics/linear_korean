@@ -192,8 +192,9 @@ pub fn create_glyphs(glyph_set: &str) -> Result<HashMap<u16, Glyph>, Error> {
     lua.globals().set("CAP_HEIGHT", args.cap_height).unwrap();
     lua.globals().set("MIN_GAP", args.min_gap).unwrap();
     let mut m: HashMap<u16, Glyph> = HashMap::default();
-    //let glyph = create_simple_glyph(glyph_set, "space", Sung::Cho, &lua)?;
-    //m.insert(32, Glyph::Simple(glyph));
+    if args.space_width.is_some() {
+        m.insert(32, Glyph::Empty);
+    }
     let glyph_names = [
         ("bieub", 0x1107, 0x11b8),
         ("chieuch", 0x110e, 0x11be),

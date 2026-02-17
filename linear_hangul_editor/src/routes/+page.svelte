@@ -1,7 +1,6 @@
 <script>
     import { invoke } from "@tauri-apps/api/core";
     import { listen } from "@tauri-apps/api/event";
-    import { message } from "@tauri-apps/plugin-dialog";
     import { onMount } from "svelte";
     import GlyphDataEditor from "../lib/glyph_data_editor.svelte";
     import ConfigEditor from "$lib/config_editor.svelte";
@@ -35,6 +34,47 @@
     let save_prompt_value = $state("");
     let /** @type {((value: string | null) => void) | null} */ save_prompt_resolve =
             null;
+    let alert_dialog_open = $state(false);
+    let alert_dialog_title = $state("Error");
+    let alert_dialog_message = $state("");
+
+    /**
+     * @param {any} error
+     * @returns {string}
+     */
+    function format_error_message(error) {
+        if (error == null) {
+            return "Unknown error";
+        }
+        if (typeof error == "string") {
+            return error;
+        }
+        if (error instanceof Error) {
+            return error.message;
+        }
+        try {
+            return JSON.stringify(error, null, 2);
+        } catch {
+            return String(error);
+        }
+    }
+
+    /**
+     * @param {string} title
+     * @param {string} message_text
+     */
+    function open_alert_dialog(title, message_text) {
+        alert_dialog_title = title;
+        alert_dialog_message = message_text
+            .replaceAll("\\r\\n", "\n")
+            .replaceAll("\\n", "\n")
+            .replaceAll("\\r", "\n");
+        alert_dialog_open = true;
+    }
+
+    function close_alert_dialog() {
+        alert_dialog_open = false;
+    }
 
     /**
      * @param {string | null} value
@@ -130,8 +170,8 @@
     const unlisten_error = listen(
         "error",
         async function (/** @type {any} */ event) {
-            error_msg = event.payload;
-            await message(error_msg, { title: "Error", kind: "error" });
+            error_msg = format_error_message(event.payload);
+            open_alert_dialog("Compile Error", error_msg);
             ready_to_compile = true;
         },
     );
@@ -333,7 +373,8 @@
         })
             .then(() => {})
             .catch(async function (e) {
-                await message(e, { title: "Error", kind: "error" });
+                error_msg = format_error_message(e);
+                open_alert_dialog("Error", error_msg);
             });
         await get_font_names(null);
         fontname = next_font_name;
@@ -389,11 +430,17 @@
         await config_editor_ref.save(event);
         await glyph_data_editor_1.save(event);
         await glyph_data_editor_2.save(event);
-        await invoke("run_compile", {
-            glyphSet: glyph_set,
-            configName: config_name,
-            kerningName: kerning_name,
-        });
+        try {
+            await invoke("run_compile", {
+                glyphSet: glyph_set,
+                configName: config_name,
+                kerningName: kerning_name,
+            });
+        } catch (e) {
+            error_msg = format_error_message(e);
+            open_alert_dialog("Compile Error", error_msg);
+            ready_to_compile = true;
+        }
     }
 </script>
 
@@ -594,6 +641,20 @@
                         Cancel
                     </button>
                     <button onclick={confirm_save_prompt}>Save</button>
+                </div>
+            </div>
+        </div>
+    {/if}
+    {#if alert_dialog_open}
+        <div
+            class="fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
+        >
+            <div class="w-[32rem] rounded-md bg-stone-900 p-4 text-white">
+                <div class="text-sm font-semibold">{alert_dialog_title}</div>
+                <pre
+                    class="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-md border border-stone-600 bg-stone-800 p-2 text-sm">{alert_dialog_message}</pre>
+                <div class="mt-3 flex justify-end">
+                    <button onclick={close_alert_dialog}>OK</button>
                 </div>
             </div>
         </div>
