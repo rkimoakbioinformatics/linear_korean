@@ -333,45 +333,76 @@
 </script>
 
 <main class="w-full h-screen flex flex-col">
-    <div class="flex justify-between h-96">
+    <div class="flex h-96">
         <div class="flex items-center">
-            <label for="char-size" class="">Size</label>
-            <select bind:value={char_size}>
-                <option value={16}>16</option>
-                <option value={24}>24</option>
-                <option value={100}>100</option>
-            </select>
-            <select bind:value={content_name} onchange={get_content}>
-                {#each content_names as item}
-                    <option value={item}>{item}</option>
-                {/each}
-            </select>
-            <button onclick={get_content} class="mx-1">Load</button>
-            <button onclick={save_content} class="mx-1">Save</button>
-            <button onclick={get_content_names} class="mx-1">Refresh</button>
-            <div class="mx-4">
-                <input
-                    type="text"
-                    bind:value={char}
-                    class="border-1 w-8 self-center p-2"
-                />
-                <span class="">{char}</span>
-                <span class="linkor">{char}</span>
+            <div class="border-r">
+                <label for="char-size" class="">Size</label>
+                <select id="char-size" bind:value={char_size}>
+                    <option value={16}>16</option>
+                    <option value={24}>24</option>
+                    <option value={64}>64</option>
+                    <option value={100}>100</option>
+                </select>
+                <select bind:value={content_name} onchange={get_content}>
+                    {#each content_names as item}
+                        <option value={item}>{item}</option>
+                    {/each}
+                </select>
+                <button onclick={get_content_names} class="nobg"
+                    >&#x1F504;</button
+                >
+                <button
+                    onclick={get_content}
+                    class="nobg"
+                    title="Load content"
+                    aria-label="Load content"
+                >
+                    &#x1F4C2;
+                </button>
+                <button
+                    onclick={save_content}
+                    class="nobg"
+                    title="Save content"
+                    aria-label="Save content"
+                >
+                    &#x1F4BE;
+                </button>
+            </div>
+            <div class="border-r">
+                <div class="mx-4">
+                    <input type="text" bind:value={char} class="w-4" />
+                    <span>&#x2192;</span>
+                    <span class="linkor w-4">{char}</span>
+                </div>
             </div>
             <select bind:value={fontname} onchange={get_font}>
                 {#each fontnames as item}
                     <option value={item}>{item}</option>
                 {/each}
             </select>
-            <button onclick={delete_font} class="mx-1">Delete</button>
-            <button onclick={get_font_names} class="mx-1">Refresh</button>
+            <button
+                onclick={delete_font}
+                class="mx-1 nobg"
+                title="Delete font"
+                aria-label="Delete font"
+            >
+                &#x1F5D1;
+            </button>
+            <button
+                onclick={get_font_names}
+                class="mx-1 nobg"
+                title="Refresh fonts"
+                aria-label="Refresh fonts"
+            >
+                &#x1F504;
+            </button>
             <input
                 type="text"
                 bind:value={new_fontname}
                 class="border rounded-md p-2"
                 placeholder="Font name"
             />
-            <button onclick={save_font}>Save Font</button>
+            <button class="nobg" onclick={save_font}>&#x1F4BE;</button>
         </div>
         <div>
             <button
@@ -390,12 +421,12 @@
     <div class="flex space-x-4 h-full">
         <div class="flex flex-col w-6/10 space-y-0">
             <textarea
-                class="border rounded-md h-[40%] p-2"
+                class="border rounded-md h-[20%] p-2"
                 bind:value={content}
-                style:font-size={char_size + "px"}
+                style="font-size=12px;"
             ></textarea>
             <textarea
-                class="border rounded-md linkor h-[40%] p-2"
+                class="border rounded-md linkor h-[60%] p-2"
                 bind:value={content}
                 style:font-size={char_size + "px"}
             ></textarea>
@@ -408,7 +439,14 @@
                         <option value={item}>{item}</option>
                     {/each}
                 </select>
-                <button onclick={delete_tool_set} class="mx-1">Delete</button>
+                <button
+                    onclick={delete_tool_set}
+                    class="mx-1 nobg"
+                    title="Delete tool set"
+                    aria-label="Delete tool set"
+                >
+                    &#x1F5D1;
+                </button>
                 <input
                     type="text"
                     bind:value={new_tool_set_name}
@@ -416,7 +454,9 @@
                     onchange={get_tool_set_data}
                     class="border rounded-md p-1"
                 />
-                <button onclick={save_tool_set} class="mx-1">Save</button>
+                <button onclick={save_tool_set} class="mx-1 nobg"
+                    >&#x1F4BE</button
+                >
                 <!--<button onclick={copy_tool_set} class="mx-1">Copy</button>-->
             </div>
             <div class="flex space-y-4">
@@ -425,19 +465,30 @@
                 <ConfigEditor bind:this={config_editor_ref} bind:config_name
                 ></ConfigEditor>
             </div>
-            <div class="flex flex-col space-y-4">
-                <div class="flex">
+            <div class="flex flex-col">
+                <div class="flex items-center">
+                    <span>Glyph Set</span>
                     <select bind:value={glyph_set} onchange={change_glyph_set}>
                         {#each glyph_set_names as item}
                             <option value={item}>{item}</option>
                         {/each}
                     </select>
-                    <button onclick={get_glyph_set_names} class="mx-1"
-                        >Refresh</button
+                    <button
+                        onclick={get_glyph_set_names}
+                        class="mx-1 nobg"
+                        title="Refresh glyph sets"
+                        aria-label="Refresh glyph sets"
                     >
-                    <button onclick={delete_glyph_set} class="mx-1"
-                        >Delete</button
+                        &#x1F504;
+                    </button>
+                    <button
+                        onclick={delete_glyph_set}
+                        class="mx-1 nobg"
+                        title="Delete glyph set"
+                        aria-label="Delete glyph set"
                     >
+                        &#x1F5D1;
+                    </button>
                     <input
                         type="text"
                         bind:value={new_glyph_set}
@@ -445,12 +496,16 @@
                         onchange={copy_glyph_set}
                         class="border rounded-md p-1"
                     />
-                    <button onclick={copy_glyph_set} class="mx-1">Copy</button>
+                    <button onclick={copy_glyph_set} class="mx-1 nobg"
+                        >&#x1F4BE</button
+                    >
                 </div>
-                <GlyphDataEditor bind:this={glyph_data_editor_1} {glyph_set}
-                ></GlyphDataEditor>
-                <GlyphDataEditor bind:this={glyph_data_editor_2} {glyph_set}
-                ></GlyphDataEditor>
+                <div class="flex">
+                    <GlyphDataEditor bind:this={glyph_data_editor_1} {glyph_set}
+                    ></GlyphDataEditor>
+                    <GlyphDataEditor bind:this={glyph_data_editor_2} {glyph_set}
+                    ></GlyphDataEditor>
+                </div>
             </div>
         </div>
     </div>
@@ -469,11 +524,15 @@
     }
 
     button {
-        @apply rounded-sm bg-indigo-600 px-2 py-1 text-base font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600;
+        @apply rounded-sm bg-blue-600 px-2 py-1 text-base font-semibold text-white shadow-xs hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500;
     }
 
     button.disabled {
         @apply bg-stone-500;
+    }
+
+    button.nobg {
+        @apply rounded-sm bg-transparent px-2 py-1 text-base font-semibold text-white shadow-xs hover:bg-transparent focus-visible:outline-2 focus-visible:outline-offset-2;
     }
 
     .linkor {
