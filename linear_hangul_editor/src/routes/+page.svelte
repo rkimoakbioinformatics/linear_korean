@@ -14,12 +14,11 @@
     let /** @type {any} */ glyph_data_editor_2;
     let DEFAULT_FONT_NAME = "generated";
     let content = $state("");
-    let char_size = $state("24");
+    let char_size = $state("16");
     let char = $state("가");
     let content_name = $state("content.txt");
     let /** @type {any} */ content_names = $state([]);
     let fontname = $state(DEFAULT_FONT_NAME);
-    let new_fontname = $state("");
     let /** @type {any} */ font_data = $state([]);
     let /** @type {any} */ fontnames = $state([]);
     let config_name = $state("default");
@@ -27,12 +26,50 @@
     let /** @type {any} */ loadedFont = null;
     let /** @type {any} */ glyph_set = $state("default");
     let /** @type {any} */ glyph_set_names = $state([]);
-    let new_glyph_set = $state("");
     let /** @type {any} */ tool_set_names = $state([]);
     let tool_set_name = $state("");
-    let new_tool_set_name = $state("");
     let error_msg = $state("");
     let ready_to_compile = $state(true);
+    let save_prompt_open = $state(false);
+    let save_prompt_title = $state("");
+    let save_prompt_value = $state("");
+    let /** @type {((value: string | null) => void) | null} */ save_prompt_resolve =
+            null;
+
+    /**
+     * @param {string | null} value
+     */
+    function close_save_prompt(value) {
+        if (save_prompt_resolve) {
+            save_prompt_resolve(value);
+        }
+        save_prompt_resolve = null;
+        save_prompt_open = false;
+        save_prompt_title = "";
+        save_prompt_value = "";
+    }
+
+    /**
+     * @param {string} title
+     * @param {string} initial_value
+     * @returns {Promise<string | null>}
+     */
+    function request_save_name(title, initial_value) {
+        save_prompt_title = title;
+        save_prompt_value = initial_value;
+        save_prompt_open = true;
+        return new Promise((resolve) => {
+            save_prompt_resolve = resolve;
+        });
+    }
+
+    function confirm_save_prompt() {
+        const next_value = save_prompt_value.trim();
+        if (next_value == "") {
+            return;
+        }
+        close_save_prompt(next_value);
+    }
 
     onMount(async function () {
         const copy = await PredefinedMenuItem.new({
@@ -129,7 +166,11 @@
      * @param {any} event
      */
     export async function save_tool_set(event) {
-        if (new_tool_set_name == "") {
+        let next_tool_set_name = await request_save_name(
+            "Save tool set as",
+            tool_set_name || "",
+        );
+        if (next_tool_set_name == null) {
             return;
         }
         console.log("saving toolset", config_name, kerning_name, glyph_set);
@@ -139,10 +180,10 @@
                 kerning_name: kerning_name,
                 glyph_set: glyph_set,
             },
-            toolSetName: new_tool_set_name,
+            toolSetName: next_tool_set_name,
         });
         await get_tool_set_names(null);
-        tool_set_name = new_tool_set_name;
+        tool_set_name = next_tool_set_name;
     }
 
     /**
@@ -195,14 +236,22 @@
      * @param {any} event
      */
     export async function copy_glyph_set(event) {
-        if (glyph_set == "" || new_glyph_set == "") {
+        if (glyph_set == "") {
+            return;
+        }
+        let next_glyph_set = await request_save_name(
+            "Save glyph set as",
+            glyph_set || "",
+        );
+        if (next_glyph_set == null) {
             return;
         }
         await invoke("copy_glyph_set", {
             glyphSet: glyph_set,
-            newGlyphSet: new_glyph_set,
+            newGlyphSet: next_glyph_set,
         });
         await get_glyph_set_names(null);
+        glyph_set = next_glyph_set;
     }
 
     /**
@@ -268,19 +317,26 @@
      * @param {any} event
      */
     async function save_font(event) {
-        if (fontname == "" || new_fontname == "") {
+        if (fontname == "") {
+            return;
+        }
+        let next_font_name = await request_save_name(
+            "Save font as",
+            fontname || "",
+        );
+        if (next_font_name == null) {
             return;
         }
         invoke("save_font", {
             oldName: fontname,
-            newName: new_fontname,
+            newName: next_font_name,
         })
             .then(() => {})
             .catch(async function (e) {
                 await message(e, { title: "Error", kind: "error" });
             });
         await get_font_names(null);
-        fontname = new_fontname;
+        fontname = next_font_name;
     }
 
     //
@@ -306,10 +362,19 @@
      * @param {any} event
      */
     async function save_content(event) {
+        let next_content_name = await request_save_name(
+            "Save content as filename",
+            content_name || "",
+        );
+        if (next_content_name == null) {
+            return;
+        }
         await invoke("save_content", {
             content: content,
-            contentName: content_name,
+            contentName: next_content_name,
         });
+        content_name = next_content_name;
+        await get_content_names(null);
     }
 
     /**
@@ -333,48 +398,46 @@
 </script>
 
 <main class="w-full h-screen flex flex-col">
-    <div class="flex h-96">
-        <div class="flex items-center">
-            <div class="border-r">
-                <label for="char-size" class="">Size</label>
-                <select id="char-size" bind:value={char_size}>
-                    <option value={16}>16</option>
-                    <option value={24}>24</option>
-                    <option value={64}>64</option>
-                    <option value={100}>100</option>
-                </select>
-                <select bind:value={content_name} onchange={get_content}>
-                    {#each content_names as item}
-                        <option value={item}>{item}</option>
-                    {/each}
-                </select>
-                <button onclick={get_content_names} class="nobg"
-                    >&#x1F504;</button
-                >
-                <button
-                    onclick={get_content}
-                    class="nobg"
-                    title="Load content"
-                    aria-label="Load content"
-                >
-                    &#x1F4C2;
-                </button>
-                <button
-                    onclick={save_content}
-                    class="nobg"
-                    title="Save content"
-                    aria-label="Save content"
-                >
-                    &#x1F4BE;
-                </button>
+    <div class="flex items-center">
+        <div class="border-r">
+            <label for="char-size">Size</label>
+            <select id="char-size" bind:value={char_size}>
+                <option value={16}>16</option>
+                <option value={24}>24</option>
+                <option value={64}>64</option>
+                <option value={100}>100</option>
+            </select>
+            <select bind:value={content_name} onchange={get_content}>
+                {#each content_names as item}
+                    <option value={item}>{item}</option>
+                {/each}
+            </select>
+            <button onclick={get_content_names} class="nobg">&#x1F504;</button>
+            <button
+                onclick={get_content}
+                class="nobg"
+                title="Load content"
+                aria-label="Load content"
+            >
+                &#x1F4C2;
+            </button>
+            <button
+                onclick={save_content}
+                class="nobg"
+                title="Save content"
+                aria-label="Save content"
+            >
+                &#x1F4BE;
+            </button>
+        </div>
+        <div class="border-r">
+            <div class="mx-4">
+                <input type="text" bind:value={char} class="w-4" />
+                <span>&#x2192;</span>
+                <span class="linkor w-4">{char}</span>
             </div>
-            <div class="border-r">
-                <div class="mx-4">
-                    <input type="text" bind:value={char} class="w-4" />
-                    <span>&#x2192;</span>
-                    <span class="linkor w-4">{char}</span>
-                </div>
-            </div>
+        </div>
+        <div class="border-r">
             <select bind:value={fontname} onchange={get_font}>
                 {#each fontnames as item}
                     <option value={item}>{item}</option>
@@ -396,15 +459,16 @@
             >
                 &#x1F504;
             </button>
-            <input
-                type="text"
-                bind:value={new_fontname}
-                class="border rounded-md p-2"
-                placeholder="Font name"
-            />
-            <button class="nobg" onclick={save_font}>&#x1F4BE;</button>
+            <button
+                class="nobg"
+                onclick={save_font}
+                title="Save font as"
+                aria-label="Save font as"
+            >
+                &#x1F4BE;
+            </button>
         </div>
-        <div>
+        <div class="ml-2">
             <button
                 onclick={compile}
                 class={["text-xl p-2 w-48", !ready_to_compile && "disabled"]}
@@ -419,19 +483,19 @@
         </div>
     </div>
     <div class="flex space-x-4 h-full">
-        <div class="flex flex-col w-6/10 space-y-0">
+        <div class="flex flex-col grow space-y-0">
             <textarea
-                class="border rounded-md h-[20%] p-2"
-                bind:value={content}
-                style="font-size=12px;"
-            ></textarea>
-            <textarea
-                class="border rounded-md linkor h-[60%] p-2"
+                class="border rounded-md linkor grow p-2"
                 bind:value={content}
                 style:font-size={char_size + "px"}
             ></textarea>
+            <textarea
+                class="border rounded-md h-48 p-2"
+                bind:value={content}
+                style="font-size=16px;"
+            ></textarea>
         </div>
-        <div class="flex flex-col space-y-4 w-4/10 h-full">
+        <div class="flex flex-col space-y-4 w-96 h-full">
             <div class="flex">
                 Toolset
                 <select bind:value={tool_set_name} onchange={get_tool_set_data}>
@@ -447,16 +511,14 @@
                 >
                     &#x1F5D1;
                 </button>
-                <input
-                    type="text"
-                    bind:value={new_tool_set_name}
-                    placeholder="Tool set"
-                    onchange={get_tool_set_data}
-                    class="border rounded-md p-1"
-                />
-                <button onclick={save_tool_set} class="mx-1 nobg"
-                    >&#x1F4BE</button
+                <button
+                    onclick={save_tool_set}
+                    class="mx-1 nobg"
+                    title="Save tool set as"
+                    aria-label="Save tool set as"
                 >
+                    &#x1F4BE;
+                </button>
                 <!--<button onclick={copy_tool_set} class="mx-1">Copy</button>-->
             </div>
             <div class="flex space-y-4">
@@ -489,18 +551,16 @@
                     >
                         &#x1F5D1;
                     </button>
-                    <input
-                        type="text"
-                        bind:value={new_glyph_set}
-                        placeholder="Glyph set"
-                        onchange={copy_glyph_set}
-                        class="border rounded-md p-1"
-                    />
-                    <button onclick={copy_glyph_set} class="mx-1 nobg"
-                        >&#x1F4BE</button
+                    <button
+                        onclick={copy_glyph_set}
+                        class="mx-1 nobg"
+                        title="Save glyph set as"
+                        aria-label="Save glyph set as"
                     >
+                        &#x1F4BE;
+                    </button>
                 </div>
-                <div class="flex">
+                <div class="flex flex-col">
                     <GlyphDataEditor bind:this={glyph_data_editor_1} {glyph_set}
                     ></GlyphDataEditor>
                     <GlyphDataEditor bind:this={glyph_data_editor_2} {glyph_set}
@@ -509,6 +569,35 @@
             </div>
         </div>
     </div>
+    {#if save_prompt_open}
+        <div
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+        >
+            <div class="w-[26rem] rounded-md bg-stone-900 p-4 text-white">
+                <div class="text-sm font-semibold">{save_prompt_title}</div>
+                <input
+                    class="mt-3 w-full rounded-md border border-stone-600 bg-stone-800 p-2 text-base"
+                    bind:value={save_prompt_value}
+                    onkeydown={(event) => {
+                        if (event.key == "Enter") {
+                            confirm_save_prompt();
+                        } else if (event.key == "Escape") {
+                            close_save_prompt(null);
+                        }
+                    }}
+                />
+                <div class="mt-3 flex justify-end gap-2">
+                    <button
+                        class="nobg"
+                        onclick={() => close_save_prompt(null)}
+                    >
+                        Cancel
+                    </button>
+                    <button onclick={confirm_save_prompt}>Save</button>
+                </div>
+            </div>
+        </div>
+    {/if}
 </main>
 
 <style lang="postcss">
