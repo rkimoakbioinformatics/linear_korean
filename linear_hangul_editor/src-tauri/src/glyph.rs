@@ -345,6 +345,72 @@ pub fn add_underdot(contours: &mut Vec<Contour>, x_max: i16) {
     contours.push(curve.into());
 }
 
+pub fn add_upperdot(contours: &mut Vec<Contour>, x_max: i16) {
+    use write_fonts::read::tables::glyf::CurvePoint;
+    let args = &*CONFIG.read().unwrap();
+    let x_mid = x_max / 2;
+    let top_circle_r = (args.sw as f32 * args.upperdot_r_ratio) as i16;
+    let top_circle_top = args.upperdot_y;
+    let top_circle_bottom = top_circle_top - top_circle_r * 2;
+    let top_circle_x_c4 = x_mid + top_circle_r;
+    let top_circle_y_c4 = top_circle_bottom;
+    let top_circle_x_c3 = x_mid + top_circle_r;
+    let top_circle_y_c3 = top_circle_top;
+    let top_circle_x_c2 = x_mid - top_circle_r;
+    let top_circle_y_c2 = top_circle_top;
+    let top_circle_x_c1 = x_mid - top_circle_r;
+    let top_circle_y_c1 = top_circle_bottom;
+    let top_circle_y_mid = top_circle_top - (top_circle_top - top_circle_bottom) / 2;
+    let curve = vec![
+        CurvePoint {
+            x: x_mid,
+            y: top_circle_bottom,
+            on_curve: true,
+        },
+        CurvePoint {
+            x: top_circle_x_c1,
+            y: top_circle_y_c1,
+            on_curve: false,
+        },
+        CurvePoint {
+            x: x_mid - top_circle_r,
+            y: top_circle_y_mid,
+            on_curve: true,
+        },
+        CurvePoint {
+            x: top_circle_x_c2,
+            y: top_circle_y_c2,
+            on_curve: false,
+        },
+        CurvePoint {
+            x: x_mid,
+            y: top_circle_top,
+            on_curve: true,
+        },
+        CurvePoint {
+            x: top_circle_x_c3,
+            y: top_circle_y_c3,
+            on_curve: false,
+        },
+        CurvePoint {
+            x: x_mid + top_circle_r,
+            y: top_circle_y_mid,
+            on_curve: true,
+        },
+        CurvePoint {
+            x: top_circle_x_c4,
+            y: top_circle_y_c4,
+            on_curve: false,
+        },
+        CurvePoint {
+            x: x_mid,
+            y: top_circle_bottom,
+            on_curve: true,
+        },
+    ];
+    contours.push(curve.into());
+}
+
 pub fn create_glyph_with_points(curves: Vec<Vec<(i16, i16, bool)>>, sung: &Sung) -> SimpleGlyph {
     use write_fonts::read::tables::glyf::CurvePoint;
     let args = &*CONFIG.read().unwrap();
@@ -371,24 +437,36 @@ pub fn create_glyph_with_points(curves: Vec<Vec<(i16, i16, bool)>>, sung: &Sung)
     }
     match sung {
         Sung::Cho => {
-            if args.cho_type == UNDERBAR {
+            if args.cho_type & UNDERBAR != 0 {
                 add_underbar(&mut contours, x_max + args.cho_gap as i16);
-            } else if args.cho_type == UNDERDOT {
+            }
+            if args.cho_type & UNDERDOT != 0 {
                 add_underdot(&mut contours, x_max);
+            }
+            if args.cho_type & UPPERDOT != 0 {
+                add_upperdot(&mut contours, x_max);
             }
         }
         Sung::Jung => {
-            if args.jung_type == UNDERBAR {
+            if args.jung_type & UNDERBAR != 0 {
                 add_underbar(&mut contours, x_max + args.jung_gap as i16);
-            } else if args.jung_type == UNDERDOT {
+            }
+            if args.jung_type & UNDERDOT != 0 {
                 add_underdot(&mut contours, x_max);
+            }
+            if args.jung_type & UPPERDOT != 0 {
+                add_upperdot(&mut contours, x_max);
             }
         }
         Sung::Jong => {
-            if args.jong_type == UNDERBAR {
+            if args.jong_type & UNDERBAR != 0 {
                 add_underbar(&mut contours, x_max + args.jong_gap as i16);
-            } else if args.jong_type == UNDERDOT {
+            }
+            if args.jong_type & UNDERDOT != 0 {
                 add_underdot(&mut contours, x_max);
+            }
+            if args.jong_type & UPPERDOT != 0 {
+                add_upperdot(&mut contours, x_max);
             }
         }
     }

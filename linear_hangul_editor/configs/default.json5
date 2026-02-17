@@ -16,6 +16,8 @@
   "text_size": 24,
   "underdot_y": -300,
   "underdot_r_ratio": 0.5,
+  "upperdot_y": 1800,
+  "upperdot_r_ratio": 0.5,
   "glyph_width": 1150,
   "x_height": 1200,
   "cap_height": 1500,

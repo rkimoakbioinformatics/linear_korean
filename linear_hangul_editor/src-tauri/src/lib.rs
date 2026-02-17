@@ -119,6 +119,12 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
         if config.underdot_r_ratio.is_none() {
             config.underdot_r_ratio = in_config.underdot_r_ratio;
         }
+        if config.upperdot_y.is_none() {
+            config.upperdot_y = in_config.upperdot_y;
+        }
+        if config.upperdot_r_ratio.is_none() {
+            config.upperdot_r_ratio = in_config.upperdot_r_ratio;
+        }
         if config.glyph_width.is_none() {
             config.glyph_width = in_config.glyph_width;
         }
@@ -157,27 +163,33 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
     let mut cho_type: u8 = 0;
     cho_type_v.iter().for_each(|v| {
         if v == "underdot" {
-            cho_type += UNDERDOT;
+            cho_type |= UNDERDOT;
+        } else if v == "upperdot" {
+            cho_type |= UPPERDOT;
         } else if v == "underbar" {
-            cho_type += UNDERBAR;
+            cho_type |= UNDERBAR;
         }
     });
     let jung_type_v = config.jung_type.clone();
     let mut jung_type: u8 = 0;
     jung_type_v.iter().for_each(|v| {
         if v == "underdot" {
-            jung_type += UNDERDOT;
+            jung_type |= UNDERDOT;
+        } else if v == "upperdot" {
+            jung_type |= UPPERDOT;
         } else if v == "underbar" {
-            jung_type += UNDERBAR;
+            jung_type |= UNDERBAR;
         }
     });
     let jong_type_v = config.jong_type.clone();
     let mut jong_type: u8 = 0;
     jong_type_v.iter().for_each(|v| {
         if v == "underdot" {
-            jong_type += UNDERDOT;
+            jong_type |= UNDERDOT;
+        } else if v == "upperdot" {
+            jong_type |= UPPERDOT;
         } else if v == "underbar" {
-            jong_type += UNDERBAR;
+            jong_type |= UNDERBAR;
         }
     });
     if config.cho_h_ratio.is_none() {
@@ -215,6 +227,12 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
     }
     if config.underdot_r_ratio.is_none() {
         config.underdot_r_ratio = Some(0.5);
+    }
+    if config.upperdot_y.is_none() {
+        config.upperdot_y = Some(1800);
+    }
+    if config.upperdot_r_ratio.is_none() {
+        config.upperdot_r_ratio = Some(0.5);
     }
     if config.glyph_width.is_none() {
         config.glyph_width = Some(800);
@@ -255,6 +273,8 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
     let text_size: u16 = config.text_size.unwrap();
     let underdot_y: i16 = config.underdot_y.unwrap();
     let underdot_r_ratio: f32 = config.underdot_r_ratio.unwrap();
+    let upperdot_y: i16 = config.upperdot_y.unwrap();
+    let upperdot_r_ratio: f32 = config.upperdot_r_ratio.unwrap();
     let glyph_width: i16 = config.glyph_width.unwrap();
     let baseline: i16 = config.baseline.unwrap();
     let x_height: i16 = config.x_height.unwrap();
@@ -285,6 +305,8 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
         text_size,
         underdot_y,
         underdot_r_ratio,
+        upperdot_y,
+        upperdot_r_ratio,
         glyph_width,
         baseline,
         x_height,

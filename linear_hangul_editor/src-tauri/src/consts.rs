@@ -3,6 +3,7 @@ use ahash::HashMap;
 use std::sync::{Arc, RwLock};
 pub static UNDERBAR: u8 = 0b00000001;
 pub static UNDERDOT: u8 = 0b00000010;
+pub static UPPERDOT: u8 = 0b00000100;
 pub static TOOLSETS_DIRNAME: &str = "toolsets";
 pub static CONFIGS_DIRNAME: &str = "configs";
 pub static CONTENTS_DIRNAME: &str = "contents";
