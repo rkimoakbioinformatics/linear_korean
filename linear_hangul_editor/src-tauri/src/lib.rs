@@ -320,6 +320,66 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
 
 fn get_kerning_map(kerning_name: &str) -> Result<KerningMap, Error> {
     use std::io::BufRead;
+    fn parse_kerning_char(line: &str, token: &str, column_name: &str) -> Result<u16, Error> {
+        let mut chars = token.chars();
+        let c = match chars.next() {
+            Some(v) => v,
+            None => {
+                let msg = format!(
+                    "Error parsing kerning data: empty {} in line '{}'",
+                    column_name, line
+                );
+                return Err(Error::Font(FontError { msg }));
+            }
+        };
+        if chars.next().is_some() {
+            let msg = format!(
+                "Error parsing kerning data: {} must be a single character in line '{}'",
+                column_name, line
+            );
+            return Err(Error::Font(FontError { msg }));
+        }
+        let c = c as u16;
+        let c = KERN_JAMO_MAP.get(&c).unwrap_or(&c);
+        Ok(*c)
+    }
+
+    fn parse_kerning_column(line: &str, token: &str, column_idx: usize) -> Result<Vec<u16>, Error> {
+        let mut v: Vec<u16> = Vec::new();
+        for part in token.split('|') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let mut codepoint = parse_kerning_char(line, part, "glyph column")?;
+            if column_idx == 2 {
+                codepoint = to_jong_codepoint(line, codepoint)?;
+            }
+            v.push(codepoint);
+        }
+        Ok(v)
+    }
+
+    fn to_jong_codepoint(line: &str, cho_or_jong: u16) -> Result<u16, Error> {
+        let mut jong = CHO_TO_JONG_MAP
+            .get(&cho_or_jong)
+            .unwrap_or(&cho_or_jong)
+            .to_owned();
+        if jong == 0x11bc {
+            // Composition remaps jong IEUNG to compatibility yesieung for lookup.
+            jong = 0x3181;
+        }
+        let is_jong = jong == 0x3181 || (0x11a8..=0x11c2).contains(&jong);
+        if !is_jong {
+            let msg = format!(
+                "Error parsing kerning data: third column '{}' cannot be mapped to jong",
+                line
+            );
+            return Err(Error::Font(FontError { msg }));
+        }
+        Ok(jong)
+    }
+
     let mut m: KerningMap = HashMap::default();
     let p = get_kerning_p(kerning_name);
     if !p.exists() {
@@ -341,48 +401,55 @@ fn get_kerning_map(kerning_name: &str) -> Result<KerningMap, Error> {
                 return Err(Error::Kerning(KerningError { msg }));
             }
         };
+        let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        let mut parts = line.split(" ");
-        let prev = match parts.next() {
+        let parts: Vec<&str> = line.split(",").map(|v| v.trim()).collect();
+        if parts.len() != 4 {
+            let msg = format!(
+                "Error parsing kerning data: expected 4 comma-delimited columns in '{}'",
+                line
+            );
+            return Err(Error::Font(FontError { msg }));
+        }
+        let glyph_columns: Vec<Vec<u16>> = vec![
+            parse_kerning_column(line, parts[0], 0)?,
+            parse_kerning_column(line, parts[1], 1)?,
+            parse_kerning_column(line, parts[2], 2)?,
+        ];
+        let kern: f32 = match parts[3].parse::<f32>() {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = format!("Error parsing kerning data: {}\n{:?}", line, e);
+                return Err(Error::Font(FontError { msg }));
+            }
+        };
+        let mut pair: Option<(u16, u16)> = None;
+        for i in 0..glyph_columns.len() {
+            if glyph_columns[i].len() > 1 {
+                pair = Some((glyph_columns[i][0], glyph_columns[i][1]));
+                break;
+            }
+            if i + 1 < glyph_columns.len()
+                && !glyph_columns[i].is_empty()
+                && !glyph_columns[i + 1].is_empty()
+            {
+                pair = Some((glyph_columns[i][0], glyph_columns[i + 1][0]));
+                break;
+            }
+        }
+        let (prev, next) = match pair {
             Some(v) => v,
             None => {
-                let msg = format!("Error parsing kerning data: {}", line);
+                let msg = format!(
+                    "Error parsing kerning data: no kerning pair found in first 3 columns '{}'",
+                    line
+                );
                 return Err(Error::Font(FontError { msg }));
-                //return m;
             }
         };
-        let next = match parts.next() {
-            Some(v) => v,
-            None => {
-                let msg = format!("Error parsing kerning data: {}", line);
-                return Err(Error::Font(FontError { msg }));
-                //return m;
-            }
-        };
-        let kern: f32 = match parts.next() {
-            Some(v) => match v.parse::<f32>() {
-                Ok(v) => v,
-                Err(e) => {
-                    let msg = format!("Error parsing kerning data: {}\n{:?}", line, e);
-                    return Err(Error::Font(FontError { msg }));
-                    //return m;
-                }
-            },
-            None => {
-                let msg = format!("Error parsing kerning data: {}", line);
-                return Err(Error::Font(FontError { msg }));
-                //return m;
-            }
-        };
-        let prev = prev.chars().next().unwrap();
-        let next = next.chars().next().unwrap();
-        let prev = prev as u16;
-        let next = next as u16;
-        let prev = KERN_JAMO_MAP.get(&prev).unwrap_or_else(|| &prev);
-        let next = KERN_JAMO_MAP.get(&next).unwrap_or_else(|| &next);
-        m.insert((*prev, *next), kern);
+        m.insert((prev, next), kern);
     }
     Ok(m)
 }

@@ -451,6 +451,7 @@
             <select id="char-size" bind:value={char_size}>
                 <option value={16}>16</option>
                 <option value={24}>24</option>
+                <option value={48}>48</option>
                 <option value={64}>64</option>
                 <option value={100}>100</option>
             </select>

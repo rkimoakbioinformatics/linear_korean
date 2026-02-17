@@ -199,4 +199,25 @@ lazy_static::lazy_static! {
         v.insert(0x11b9, 0x11ba);
         v
     };
+    pub static ref CHO_TO_JONG_MAP: HashMap<u16, u16> = {
+        let mut v: HashMap<u16, u16> = HashMap::default();
+        v.insert(0x1100, 0x11a8);
+        v.insert(0x1101, 0x11a9);
+        v.insert(0x1102, 0x11ab);
+        v.insert(0x1103, 0x11ae);
+        v.insert(0x1105, 0x11af);
+        v.insert(0x1106, 0x11b7);
+        v.insert(0x1107, 0x11b8);
+        v.insert(0x1109, 0x11ba);
+        v.insert(0x110a, 0x11bb);
+        v.insert(0x110b, 0x11bc);
+        v.insert(0x110c, 0x11bd);
+        v.insert(0x110e, 0x11be);
+        v.insert(0x110f, 0x11bf);
+        v.insert(0x1110, 0x11c0);
+        v.insert(0x1111, 0x11c1);
+        v.insert(0x1112, 0x11c2);
+        v.insert(0x3181, 0x3181);
+        v
+    };
 }

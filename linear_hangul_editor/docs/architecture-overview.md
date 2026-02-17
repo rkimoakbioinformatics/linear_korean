@@ -100,7 +100,10 @@ Command groups:
 
 ### File format notes
 - Toolset file: `config_name kerning_name glyph_set` relationship.
-- Kerning txt line format: `<prev_char> <next_char> <float_kern>`.
+- Kerning txt line format: `<cho_char>,<jung_char>,<jong_char_as_cho>,<float_kern>`.
+- First 3 columns may be empty and each column can contain multiple values split by `|`.
+- Third column uses cho-form consonants and is converted to jong internally (e.g. `ㄱ` -> `ᆨ`).
+- One kerning pair is produced per line: scanning left to right, first use two values from one column; otherwise use two non-empty adjacent columns. The first pair found is used.
 - Glyph Lua files return `curves` arrays of points `[x, y, on_curve_flag]`.
 - Config JSON5 controls dimensions/ratios/gaps/stroke behavior and optional source font.
 
