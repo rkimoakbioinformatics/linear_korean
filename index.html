@@ -15,40 +15,32 @@
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>
         @font-face {
-            font-family: linkor-even;
-            src: url('linear-korean-even.woff2') format('woff2')
+            font-family: linkor-highlowtwo;
+            src: url('highlow_currentglyph.woff2') format('woff2')
+        }
+        @font-face {
+            font-family: linkor-ujj;
+            src: url('ujj.woff2') format('woff2')
+        }
+        @font-face {
+            font-family: linkor-chodot-six;
+            src: url('linear-korean-chodot-jong6.woff2') format('woff2')
+        }
+        @font-face {
+            font-family: linkor-jong-six;
+            src: url('linear-korean-jong6.woff2') format('woff2')
         }
         @font-face {
             font-family: linkor-updot;
             src: url('linear-korean-unicode-updot.woff2') format('woff2')
         }
         @font-face {
-            font-family: linkor-jong-underbar-even;
-            src: url('linear-korean-jong-underbar-even.woff2') format('woff2')
-        }
-        @font-face {
             font-family: linkor-jong-underdot-even;
             src: url('linear-korean-jong-underdot-even.woff2') format('woff2')
         }
         @font-face {
-            font-family: linkor-all-underbar-even;
-            src: url('linear-korean-all-underbar-even.woff2') format('woff2')
-        }
-        @font-face {
-            font-family: linkor-all-underbar-seven;
-            src: url('linear-korean-all-underbar-seven.woff2') format('woff2')
-        }
-        @font-face {
-            font-family: linkor-jong-underdot-seven;
-            src: url('linear-korean-jong-underdot-seven.woff2') format('woff2')
-        }
-        @font-face {
-            font-family: linkor-jong-underbar-seven;
-            src: url('linear-korean-jong-underbar-seven.woff2') format('woff2')
-        }
-        @font-face {
-            font-family: linkor-all-seven;
-            src: url('linear-korean-all-seven.woff2') format('woff2')
+            font-family: linkor-tb;
+            src: url('linear-korean-tb.woff2') format('woff2')
         }
         #input {
             font-family: gulim;
@@ -67,12 +59,20 @@
             width: 100px;
             vertical-align: top;
         }
-        .linkor-jong-underbar-even {
-            font-family: linkor-jong-underbar-even;
+        .linkor-highlowtwo {
+            font-family: linkor-highlowtwo;
             font-weight: regular;
         }
-        .linkor-even {
-            font-family: linkor-even;
+        .linkor-ujj {
+            font-family: linkor-ujj;
+            font-weight: regular;
+        }
+        .linkor-chodot-six {
+            font-family: linkor-chodot-six;
+            font-weight: regular;
+        }
+        .linkor-jong-six {
+            font-family: linkor-jong-six;
             font-weight: regular;
         }
         .linkor-updot {
@@ -83,24 +83,8 @@
             font-family: linkor-jong-underdot-even;
             font-weight: regular;
         }
-        .linkor-all-underbar-even {
-            font-family: linkor-all-underbar-even;
-            font-weight: regular;
-        }
-        .linkor-jong-underdot-seven {
-            font-family: linkor-jong-underdot-seven;
-            font-weight: regular;
-        }
-        .linkor-jong-underbar-seven {
-            font-family: linkor-jong-underbar-seven;
-            font-weight: regular;
-        }
-        .linkor-all-underbar-seven {
-            font-family: linkor-all-underbar-seven;
-            font-weight: regular;
-        }
-        .linkor-all-seven {
-            font-family: linkor-all-seven;
+        .linkor-tb {
+            font-family: linkor-tb;
             font-weight: regular;
         }
         table {
@@ -112,10 +96,15 @@
         }
         .paragraph {
             margin-bottom: 1rem;
+            text-align: justify;
         }
         body {
             margin: 1.5rem;
-            font-size: 1.2em;
+            font-size: 1.15rem;
+        }
+        .flex-col {
+            display: flex;
+            flex-direction: column;
         }
         .content_area {
             width: 100%;
@@ -123,16 +112,18 @@
         .content_area textarea {
             width: 100%;
             height: 400px;
-            font-size: 1.5rem;
+            font-size: 1rem;
         }
         .test_area {
             width: 100%;
+            display: flex;
+            flex-wrap: wrap;
         }
         .test_area textarea {
-            justify-self: stretch;
+            width: 600px;
         }
         .big_button {
-            font-size: 1.6em;
+            font-size: 1em;
             padding: 1rem;
             border-radius: 1rem;
             background-color: #00BFFF;
@@ -147,31 +138,69 @@
 
 <body>
     <h1>한글 풀어쓰기 폰트 데모 Linear Hangul Demo</h1>
-    <div class="paragraph">한글 풀어쓰기를 테스트해 보세요. Test linear Hangul systems.</div>
-    <div class="paragraph">어느 창이든 수정 가능하며 모든 창이 업데이트 됩니다. You can type in any window and all windows will be updated.</div>
-</div>
-<div class="content_area" x-data="{ message: '나라말이 중국과 달라, 한문 한자와 서로 통하지 아니하므로, 어리석은 백성들이 말하고자 하는 바가 있어도, 끝내 제 뜻을 펴지 못하는 사람이 많다. 내가 이를 불쌍히 여겨, 새로 스물 여덟 글자를 만드니, 사람마다 하여금 쉽게 익혀, 날마다 씀에 편하게 하고자 할 따름이다.\n\n동해 물과 백두산이 마르고 닳도록 하느님이 보우하사 우리나라 만세. 무궁화 삼천리 화려 강산 대한 사람, 대한으로 길이 보전하세.\n\n우리는 민족중흥의 역사적 사명을 띠고 이 땅에 태어났다. 조상의 빛난 얼을 오늘에 되살려 안으로 자주독립의 자세를 확립하고 밖으로 인류공영에 이바지할 때다. 이에 우리의 나아갈 바를 밝혀 교육의 지표로 삼는다. 성실한 마음과 튼튼한 몸으로 학문과 기술을 배우고 익히며 타고난 저마다의 소질을 계발하고 우리의 처지를 약진의 발판으로 삼아 창조의 힘과 개척의 정신을 기른다. 공익과 질서를 앞세우며 능률과 실질을 숭상하고 경애와 신의에 뿌리박은 상부상조의 전통을 이어받아 명랑하고 따뜻한 협동정신을 북돋운다. 우리의 창의와 협력을 바탕으로 나라가 발전하며 나라의 융성이 나의 발전임을 깨달아 자유와 권리에 따르는 책임과 의무를 다하여 스스로 국가건설에 참여하고 봉사하는 국민정신을 드높인다. 반공민주정신에 투철한 애국애족이 우리의 삶의 길이며 자유세계의 이상을 실현하는 기반이다. 길이 후손에 물려줄 영광된 통일조국의 앞날을 내다보며 신념과 긍지를 지닌 근면한 국민으로서 민족의 슬기를 모아 줄기찬 노력으로 새 역사를 창조하자.' }">
-    <div class="test_area">
-        <textarea x-model="message"></textarea>
-        <h2>Even</h2>
-        <textarea class='linkor-even' x-model="message"></textarea>
-        <h2>Jong Underdot Even</h2>
-        <textarea class='linkor-jong-underdot-even' x-model="message"></textarea>
-        <h2>Jong Underbar Even</h2>
-        <textarea class='linkor-jong-underbar-even' x-model="message"></textarea>
-        <h2>All Underbar Even</h2>
-        <textarea class='linkor-all-underbar-even' x-model="message"></textarea>
-        <h2>70%</h2>
-        <textarea class='linkor-all-seven' x-model="message"></textarea>
-        <h2>Jong Underdot 70%</h2>
-        <textarea class='linkor-jong-underdot-seven' x-model="message"></textarea>
-        <h2>Jong Underbar 70%</h2>
-        <textarea class='linkor-jong-underbar-seven' x-model="message"></textarea>
-        <h2>All Underbar 70%</h2>
-        <textarea class='linkor-all-underbar-seven' x-model="message"></textarea>
-        <h2>Updot</h2>
-        <textarea class='linkor-updot' x-model="message"></textarea>
-    </div>
+<div style="display: flex;">
+    <div style="min-width: 400px; max-width: 400px; margin-right: 50px;">
+<h2>Why Linear Hangul?</h2>
+<div class="paragraph">Hangul used to have more glyphs for more sounds. For example, ㅍ sounds like "p", but there was ᇴ which has a dot under ㅍ which is supposed to sound like "f". The same happens to ㅂ. Adding a dot under ㅂ makes the sound to be like "v". The sound of Korean language has become simpler, so several Hangul glyphs were deprecated. However, when Hangul was first made, the purpose of it as stated by King Sejong was to be able to denote the sounds of all languages as well as those of nature.
+<br /><br />
+I myself see in Hangul the potential of a universal writing system. There are a few group of people around the world who don't have a writing system of their own and adopted Hangul to write their language. For this to happen, additional glyphs will be needed to accommodate the sounds of other languages. For example, a click sound in an African language.
+<br /><br />
+Also, there were more ways to combine initial consonants as well as combine last consonants in the past, to write more sounds.
+<br /><br />
+Currently, Unicode has a bit more than 11,000 Hangul characters. It is Ok for normal current Korean language. However, as more combination of consonants and vowels are needed to be written and as more glyphs for other languages' sounds are added (not haphazardly but systematically), the number of characters made with Hangul simple glyphs will exceed what Unicode can contain.
+<br /><br />
+Hence, the need for non-combinatorial data structure for Hangul. There are other benefits such as sorting, etc., but this is the biggest reason for me currently.
+<h2>Systematic Construction of Hangul Consonants</h2>
+The shape of Hangul consonants were systematically made. 
+
+ㄴ is soft. Add a horizontal line at the top, it becomes ㄷ which uses the same tongue position but sounds harder. To ㄷ, add another horizontal line to make ㅌ which is aspirated ㄷ, or repeat it to make ㄸ which is tense ㄷ. In summary,
+
+<pre style="font-size: 0.9rem;">
+ㄴ (soft) 
+  -> top horizontal line -> ㄷ (harder) 
+    -> another horiz. line -> ㅌ (aspirated)
+    -> repeat -> ㄸ (tense)
+
+</pre>
+ㅅ ㅈ ㅊ ㅉ has the same principle.
+
+<br /><br />
+ㆁ ㄱ ㅋ ㄲ also has the same principle. ㆁ was in the original Hangul (Hun-min-jeong-um). Its sound is the similar to "ng" in so"ng". The location where airway is blocked is almost the same as in ㄱ. It is a verical line and a circle. If we remove the top horizontal line from ㄱ, we are left with ㅣ. Since this is the same shape as the vowel ㅣ, I believe that a circle was added at the bottom to denote that it is a consonant.
+
+<br /><br />
+ㅇ ㆆ ㅎ ㆆㆆ would be the sample principle, but in modern Hangul there are only ㅇ and ㅎ. In the original Hangul, instead of ㆆㆆ, there is ㆅ which I guess is the tense version of ㅎ.
+
+<br /><br />
+ㅁ ㅂ ㅍ ㅃ - in this sequence, ㅁ to ㅂ is not by adding a horizontal line at the top. ㅂ to ㅍ is not by adding another horizontal line. Using the same principle, I would reconstruct this sequence as:
+
+<pre style="font-size: 0.6rem;">
+            ════ 
+      ╔══╗  ╔══╗  ╔══╗╔══╗
+║  ║  ║  ║  ║  ║  ║  ║║  ║
+╚══╝  ╚══╝  ╚══╝  ╚══╝╚══╝
+</pre>
+
+A note about the second horizontal line to make aspirated sounds: In ㅊ and ㅎ, this can be written as a short vertical line on top of the top horizontal line.
+<br /><br />
+Interestingly, in the original Hangul, consonants were ordered as
+<br /><br />
+ㄱ ㄲ ㅋ ㆁ ㄷ ㄸ ㅌ ㄴ ㅥ ㅂ ㅃ ㅍ ㅁ ㅈ ㅉ ㅊ ㅅ ㅆ ㆆ ㅎ ㆅ ㅇ ㄹ ㅿ
+<br /><br />
+which is
+<pre>
+ㄱ ㄲ ㅋ ㆁ 
+ㄷ ㄸ ㅌ ㄴ ㅥ (note ㅥ which is tense ㄴ)
+ㅂ ㅃ ㅍ ㅁ 
+ㅈ ㅉ ㅊ ㅅ ㅆ 
+ㆆ ㅎ ㆅ ㅇ 
+ㄹ ㅿ (exception group)
+</pre>
+More or less, the order of harder - tense - aspirated - soft is used for each consonant group. To me, this is more logical than the current Hangul consonant order ㄱ ㄴ ㄷ ㄹ ㅁ ㅂ ㅅ ㅇ ㅈ ㅊ ㅋ ㅌ ㅍ ㅎ.
+<br /><br />
+I am trying to modify Hangul glyphs to make sense in the most systematic construction while keeping readability.
+<br /><br />
+<h2>Syllabic Boundaries</h2>
+English alphabet shows phonemes (s, y, l, a, b, i, c), but not syllable boundaries (syl, la, bic). Combination Hangul (실라빅) shows both phonemes and syllable boundaries, which helps readability and makes it easy to learn how to pronounce Hangul. Linear Hangul had the drawback of losing clear syllable boundaries (ㅅㅣㄹㄹㅏㅂㅣㄱ). One important aspect of my linear Hangul research is ways to reintroduce syllable boundaries in linear Hangul.
 </div>
 <div class="paragraph">한글 풀어쓰기 폰트는 개인적 사용과 배포는 자유롭게 허용되나 단체적 사용과 상업적 사용은 라이선스의 획득이 필요합니다. You can use the font for personal use and distribution, but you need a license for group and commercial use.</div>
 <div class="paragraph">
@@ -179,9 +208,89 @@
         <a href="mailto:info@bukdugroup.com?subject=한글 풀어쓰기 폰트 사용 문의 / 피드백">한글 풀어쓰기 폰트 사용 문의 / 피드백</a>
     </button>
 </div>
-<hr />
 <div>
-    Copyright 2025 Bukdu Group, LLC
+    Content and Fonts Copyright 2025 Bukdu Group, LLC
 </div>
+    </div>
+    <div>
+<h2>Showcase</h2>
+    <div class="paragraph">한글 풀어쓰기를 테스트해 보세요. Test linear Hangul systems.</div>
+    <div class="paragraph">어느 창이든 수정 가능하며 모든 창이 업데이트 됩니다. You can type in any window and all windows will be updated.</div>
+<div class="content_area" x-data="{ message: `별 헤는 밤
+ 
+- 윤동주 -
+ 
+계절이 지나가는 하늘에는
+가을로 가득 차 있습니다.
+
+나는 아무 걱정도 없이
+가을 속의 별들을 다 헬 듯합니다.
+
+가슴 속에 하나 둘 새겨지는 별을
+이제 다 못 헤는 것은
+쉬이 아침이 오는 까닭이요
+내일 밤이 남은 까닭이요
+아직 나의 청춘이 다 하지 않은 까닭입니다.
+
+별 하나에 추억과
+별 하나에 사랑과
+별 하나에 쓸쓸함과
+별 하나에 동경과
+별 하나에 시와
+별 하나에 어머니, 어머니,
+
+어머님, 나는 별 하나에 아름다운 말 한마디씩 불러 봅니다. 소학교 때 책상을 같이 했던 아이들 의 이름과 패, 경, 옥, 이런 이국 소녀들의 이름과, 벌써 아기 어머니된 계집애들의 이름과, 가난 한 이웃 사람들의 이름과, 비둘기, 강아지, 토끼, 노새, 노루, '프랑시스 잠', '라이너 마리아 릴 케' 이런 시인의 이름을 불러 봅니다.
+
+이네들은 너무나 멀리 있습니다.
+별이 아스라이 멀 듯이.
+
+어머님,
+그리고 당신은 멀리 북간도에 계십니다.
+
+나는 무엇인지 그리워
+이 많은 별빛이 내린 언덕 위에
+내 이름자를 써 보고
+흙으로 덮어 버리었습니다.
+
+딴은 밤을 새워 우는 벌레는
+부끄러운 이름을 슬퍼하는 까닭입니다.
+
+그러나 겨울이 지나고 나의 별에도 봄이 오면
+무덤 위에 파란 잔디가 피어나듯이
+내 이름자 묻힌 언덕 우에도
+자랑처럼 풀이 무성할거외다.
+` }">
+    <div class="test_area">
+        <div class="flex-col">
+            <h3>Original</h3>
+            <textarea x-model="message" class="w-96"></textarea>
+        </div>
+        <div class="flex-col">
+            <h3>High Low 2</h3>
+            <textarea class='linkor-highlowtwo' x-model="message"></textarea>
+        </div>
+        <div class="flex-col">
+            <h3>High Low</h3>
+            <textarea class='linkor-tb' x-model="message"></textarea>
+        </div>
+        <div class="flex-col">
+            <h3>Ujj</h3>
+            <textarea class='linkor-ujj' x-model="message"></textarea>
+        </div>
+        <div class="flex-col">
+            <h3>Updot</h3>
+            <textarea class='linkor-updot' x-model="message"></textarea>
+        </div>
+        <div class="flex-col">
+            <h3>Six</h3>
+            <textarea class='linkor-jong-six' x-model="message"></textarea>
+        </div>
+        <div class="flex-col">
+            <h3>Jong Underdot Even</h3>
+            <textarea class='linkor-jong-underdot-even' x-model="message"></textarea>
+        </div>
+    </div>
+</div>
+    </div>
 </body>
 </html>

@@ -4,3 +4,8 @@ target
 *.woff
 *.otf
 .DS_Store
+bun.lockdb
+src-tauri/fonts
+src-tauri/glyph_sets
+src-tauri/kernings
+src-tauri/toolsets
