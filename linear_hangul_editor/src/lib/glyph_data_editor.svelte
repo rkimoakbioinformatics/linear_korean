@@ -1,10 +1,10 @@
 <script>
     import { invoke } from "@tauri-apps/api/core";
-    import { onMount } from "svelte";
     let glyph_name = $state("");
     let glyph_data = $state("");
     let prev_glyph_name = $state("");
-    let { glyph_set, ...props } = $props();
+    let loaded_glyph_set = $state("");
+    let { glyph_set } = $props();
 
     /**
      * @param {any} event
@@ -13,9 +13,14 @@
         if (glyph_set == "" || glyph_name == "") {
             return;
         }
-        if (prev_glyph_name != "" && glyph_data != "") {
+        if (
+            prev_glyph_name != "" &&
+            glyph_data != "" &&
+            glyph_data != "No data" &&
+            loaded_glyph_set != ""
+        ) {
             await invoke("save_glyph_data", {
-                glyphSet: glyph_set,
+                glyphSet: loaded_glyph_set,
                 glyphName: prev_glyph_name,
                 glyphData: glyph_data,
             });
@@ -25,6 +30,7 @@
             glyphName: glyph_name,
         });
         prev_glyph_name = glyph_name;
+        loaded_glyph_set = glyph_set;
     }
 
     /**
@@ -40,17 +46,25 @@
             glyphName: glyph_name,
         });
         prev_glyph_name = glyph_name;
+        loaded_glyph_set = glyph_set;
     }
 
     /**
      * @param {any} event
      */
     export async function save(event) {
-        if (glyph_name == "" || glyph_data == "" || glyph_data == "No data") {
+        let target_glyph_set =
+            loaded_glyph_set == "" ? glyph_set : loaded_glyph_set;
+        if (
+            target_glyph_set == "" ||
+            glyph_name == "" ||
+            glyph_data == "" ||
+            glyph_data == "No data"
+        ) {
             return;
         }
         await invoke("save_glyph_data", {
-            glyphSet: glyph_set,
+            glyphSet: target_glyph_set,
             glyphName: glyph_name,
             glyphData: glyph_data,
         });
@@ -95,7 +109,6 @@
             <option value="yeoe">ㅖ</option>
             <option value="yae">ㅒ</option>
         </select>
-        <button onclick={save}>&#x1F4BE;</button>
     </div>
     <textarea class="w-full h-64 border-1 p-2" bind:value={glyph_data}
     ></textarea>
@@ -103,7 +116,4 @@
 
 <style lang="postcss">
     @import "tailwindcss";
-    button {
-        @apply rounded-sm px-2 py-1 text-xs font-semibold text-white shadow-xs focus-visible:outline-2 focus-visible:outline-offset-2;
-    }
 </style>
