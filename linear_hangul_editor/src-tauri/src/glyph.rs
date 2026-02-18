@@ -16,13 +16,28 @@ use write_fonts::tables::glyf::Glyph;
 use write_fonts::tables::glyf::SimpleGlyph;
 use write_fonts::tables::hmtx::LongMetric;
 
-pub fn get_glyph_def(glyph_set: &str, glyph_name: &str) -> String {
+pub fn get_glyph_def(glyph_set: &str, glyph_name: &str) -> Result<String, Error> {
     let mut p = get_glyph_set_dir(glyph_set);
     p.push(format!("{}.lua", glyph_name));
-    let mut f = std::fs::File::open(&p).unwrap();
+    let mut f = match std::fs::File::open(&p) {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = format!(
+                "Error loading glyph definition '{}.lua' from set '{}': {:?}",
+                glyph_name, glyph_set, e
+            );
+            return Err(Error::Glyph(GlyphError { msg }));
+        }
+    };
     let mut s: String = String::new();
-    f.read_to_string(&mut s).unwrap();
-    s
+    if let Err(e) = f.read_to_string(&mut s) {
+        let msg = format!(
+            "Error reading glyph definition '{}.lua' from set '{}': {:?}",
+            glyph_name, glyph_set, e
+        );
+        return Err(Error::Glyph(GlyphError { msg }));
+    }
+    Ok(s)
 }
 
 pub fn create_simple_glyph(
@@ -43,6 +58,8 @@ pub fn get_glyph_curves(
     sung: &Sung,
 ) -> Result<Vec<Vec<(i16, i16, bool)>>, Error> {
     let args = &*CONFIG.read().unwrap();
+    lua.globals().set("X_SW", args.x_sw).unwrap();
+    lua.globals().set("Y_SW", args.y_sw).unwrap();
     match sung {
         Sung::Cho => {
             lua.globals().set("GLYPH_WIDTH", args.glyph_width).unwrap();
@@ -147,7 +164,7 @@ pub fn get_glyph_curves(
             }
         }
     }
-    let s = get_glyph_def(glyph_set, glyph_name);
+    let s = get_glyph_def(glyph_set, glyph_name)?;
     let curves: Vec<Vec<Vec<i16>>> = match lua.load(s).eval() {
         Ok(v) => v,
         Err(e) => {

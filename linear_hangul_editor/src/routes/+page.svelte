@@ -280,20 +280,25 @@
      * @param {any} event
      */
     async function get_tool_set_data(event) {
-        await config_editor_ref.save(event);
-        await kerning_editor_ref.save(event);
-        await glyph_data_editor_1.save(event);
-        await glyph_data_editor_2.save(event);
-        let data = await invoke("get_tool_set_data", {
-            toolSetName: tool_set_name,
-        });
-        glyph_set = data.glyph_set;
-        config_name = data.config_name;
-        kerning_name = data.kerning_name;
-        await config_editor_ref.load_config_data(event);
-        await kerning_editor_ref.load_kerning_data(event);
-        await glyph_data_editor_1.loadGlyphDataWithoutSave(event);
-        await glyph_data_editor_2.loadGlyphDataWithoutSave(event);
+        try {
+            await config_editor_ref.save(event);
+            await kerning_editor_ref.save(event);
+            await glyph_data_editor_1.save(event);
+            await glyph_data_editor_2.save(event);
+            let data = await invoke("get_tool_set_data", {
+                toolSetName: tool_set_name,
+            });
+            glyph_set = data.glyph_set;
+            config_name = data.config_name;
+            kerning_name = data.kerning_name;
+            await config_editor_ref.load_config_data(event);
+            await kerning_editor_ref.load_kerning_data(event);
+            await glyph_data_editor_1.loadGlyphDataWithoutSave(event);
+            await glyph_data_editor_2.loadGlyphDataWithoutSave(event);
+        } catch (e) {
+            error_msg = format_error_message(e);
+            open_alert_dialog("Error", error_msg);
+        }
     }
 
     /**
@@ -311,32 +316,37 @@
         if (next_tool_set_name == "") {
             return;
         }
-        await glyph_data_editor_1.save(event);
-        await glyph_data_editor_2.save(event);
-        await config_editor_ref.save(event, next_tool_set_name);
-        await kerning_editor_ref.save(event, next_tool_set_name);
-        if (glyph_set != next_tool_set_name) {
-            await invoke("copy_glyph_set", {
-                glyphSet: glyph_set,
-                newGlyphSet: next_tool_set_name,
+        try {
+            await glyph_data_editor_1.save(event);
+            await glyph_data_editor_2.save(event);
+            await config_editor_ref.save(event, next_tool_set_name);
+            await kerning_editor_ref.save(event, next_tool_set_name);
+            if (glyph_set != next_tool_set_name) {
+                await invoke("copy_glyph_set", {
+                    glyphSet: glyph_set,
+                    newGlyphSet: next_tool_set_name,
+                });
+            }
+            await get_glyph_set_names(null);
+            glyph_set = next_tool_set_name;
+            config_name = next_tool_set_name;
+            kerning_name = next_tool_set_name;
+            await invoke("save_tool_set", {
+                toolSet: {
+                    config_name: next_tool_set_name,
+                    kerning_name: next_tool_set_name,
+                    glyph_set: next_tool_set_name,
+                },
+                toolSetName: next_tool_set_name,
             });
+            await get_tool_set_names(null);
+            tool_set_name = next_tool_set_name;
+            await glyph_data_editor_1.loadGlyphDataWithoutSave(event);
+            await glyph_data_editor_2.loadGlyphDataWithoutSave(event);
+        } catch (e) {
+            error_msg = format_error_message(e);
+            open_alert_dialog("Error", error_msg);
         }
-        await get_glyph_set_names(null);
-        glyph_set = next_tool_set_name;
-        config_name = next_tool_set_name;
-        kerning_name = next_tool_set_name;
-        await invoke("save_tool_set", {
-            toolSet: {
-                config_name: next_tool_set_name,
-                kerning_name: next_tool_set_name,
-                glyph_set: next_tool_set_name,
-            },
-            toolSetName: next_tool_set_name,
-        });
-        await get_tool_set_names(null);
-        tool_set_name = next_tool_set_name;
-        await glyph_data_editor_1.loadGlyphDataWithoutSave(event);
-        await glyph_data_editor_2.loadGlyphDataWithoutSave(event);
     }
 
     /**
@@ -519,11 +529,11 @@
             return;
         }
         ready_to_compile = false;
-        await kerning_editor_ref.save(event);
-        await config_editor_ref.save(event);
-        await glyph_data_editor_1.save(event);
-        await glyph_data_editor_2.save(event);
         try {
+            await kerning_editor_ref.save(event);
+            await config_editor_ref.save(event);
+            await glyph_data_editor_1.save(event);
+            await glyph_data_editor_2.save(event);
             await invoke("run_compile", {
                 glyphSet: glyph_set,
                 configName: config_name,

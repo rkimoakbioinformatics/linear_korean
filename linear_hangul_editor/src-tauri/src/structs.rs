@@ -40,8 +40,9 @@ pub struct Args {
     pub cho_gap: u16,
     pub jung_gap: u16,
     pub jong_gap: u16,
-    pub sw_ratio: f32, // stroke width ratio
-    pub sw: i16,       // stroke width
+    pub x_sw: i16, // x-axis stroke width ratio
+    pub y_sw: i16, // y-axis stroke width ratio
+    pub sw: i16,   // stroke width
     pub text_size: u16,
     pub underdot_y: i16,
     pub underdot_r_ratio: f32,
@@ -72,7 +73,8 @@ pub struct Config {
     pub cho_gap: Option<u16>,
     pub jung_gap: Option<u16>,
     pub jong_gap: Option<u16>,
-    pub sw_ratio: Option<f32>,
+    pub x_sw: Option<f32>,
+    pub y_sw: Option<f32>,
     pub text_size: Option<u16>,
     pub underdot_y: Option<i16>,
     pub underdot_r_ratio: Option<f32>,

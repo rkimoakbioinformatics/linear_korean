@@ -25,7 +25,14 @@ pub fn compile(args: &Args, glyph_set: &str) -> Result<(), Error> {
     *CONFIG.write().unwrap() = args.clone();
     let font_bytes: Vec<u8>;
     if let Some(source_filename) = &args.source_filename {
-        font_bytes = std::fs::read(source_filename).unwrap();
+        font_bytes = match std::fs::read(source_filename) {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(Error::Font(FontError {
+                    msg: format!("Failed to read source font '{}': {:?}", source_filename, e),
+                }));
+            }
+        };
     } else {
         font_bytes = Vec::new();
     }
@@ -39,11 +46,26 @@ pub fn compile(args: &Args, glyph_set: &str) -> Result<(), Error> {
     modify_name(&mut font_tables)?;
     let font_data = build_font_data(&font_tables, builder);
     let p = get_font_ttf_p(&args.target_fontname);
-    let dir = p.parent().unwrap();
+    let dir = match p.parent() {
+        Some(v) => v,
+        None => {
+            return Err(Error::Font(FontError {
+                msg: format!("Invalid target font path: {:?}", p),
+            }));
+        }
+    };
     if !dir.exists() {
-        std::fs::create_dir_all(&dir).unwrap();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            return Err(Error::Font(FontError {
+                msg: format!("Failed to create output directory {:?}: {:?}", dir, e),
+            }));
+        }
     }
-    std::fs::write(&p, font_data).unwrap();
+    if let Err(e) = std::fs::write(&p, font_data) {
+        return Err(Error::Font(FontError {
+            msg: format!("Failed to write compiled font {:?}: {:?}", p, e),
+        }));
+    }
     Ok(())
 }
 
@@ -77,7 +99,13 @@ pub fn make_woff2(args: &Args) -> Result<(), Error> {
 pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> {
     let config_str = get_config_str(DEFAULT_NAME);
     if !config_str.is_empty() {
-        let in_config: Config = json5::from_str(&config_str).unwrap();
+        let in_config: Config = match json5::from_str(&config_str) {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = format!("Error parsing config '{}': {:?}", DEFAULT_NAME, e);
+                return Err(Error::Config(ConfigError { msg }));
+            }
+        };
         if config.source.is_none() {
             config.source = in_config.source;
         }
@@ -108,8 +136,11 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
         if config.jong_gap.is_none() {
             config.jong_gap = in_config.jong_gap;
         }
-        if config.sw_ratio.is_none() {
-            config.sw_ratio = in_config.sw_ratio;
+        if config.x_sw.is_none() {
+            config.x_sw = in_config.x_sw;
+        }
+        if config.y_sw.is_none() {
+            config.y_sw = in_config.y_sw;
         }
         if config.text_size.is_none() {
             config.text_size = in_config.text_size;
@@ -250,8 +281,11 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
     if config.min_gap.is_none() {
         config.min_gap = Some(200);
     }
-    if config.sw_ratio.is_none() {
-        config.sw_ratio = Some(0.08);
+    if config.x_sw.is_none() {
+        config.x_sw = Some(0.2);
+    }
+    if config.y_sw.is_none() {
+        config.y_sw = Some(0.2);
     }
     if config.space_width_ratio.is_none() {
         config.space_width_ratio = Some(2.0);
@@ -281,8 +315,9 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
     let x_height: i16 = config.x_height.unwrap();
     let cap_height: i16 = config.cap_height.unwrap();
     let min_gap: i16 = config.min_gap.unwrap();
-    let sw_ratio: f32 = config.sw_ratio.unwrap();
-    let sw: i16 = (sw_ratio * glyph_width as f32) as i16;
+    let x_sw: i16 = (config.x_sw.unwrap() * glyph_width as f32) as i16;
+    let y_sw: i16 = (config.y_sw.unwrap() * glyph_width as f32) as i16;
+    let sw: i16 = x_sw;
     let kerning_data: KerningMap = get_kerning_map(kerning_name)?;
     let space_width: Option<u16> = config.space_width;
     let space_width_ratio: f32 = config.space_width_ratio.unwrap();
@@ -301,7 +336,8 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
         cho_gap,
         jung_gap,
         jong_gap,
-        sw_ratio,
+        x_sw,
+        y_sw,
         sw,
         text_size,
         underdot_y,
@@ -561,8 +597,18 @@ fn get_config_data(config_name: String) -> String {
 }
 
 #[tauri::command]
-fn save_config(config_data: String, config_name: String) {
+fn save_config(config_data: String, config_name: String) -> Result<(), Error> {
+    if let Err(e) = json5::from_str::<Config>(&config_data) {
+        let target_name = if config_name.is_empty() {
+            DEFAULT_NAME.to_string()
+        } else {
+            config_name.clone()
+        };
+        let msg = format!("Error parsing config '{}': {:?}", target_name, e);
+        return Err(Error::Config(ConfigError { msg }));
+    }
     _save_config(&config_data, &config_name);
+    Ok(())
 }
 
 //
@@ -835,35 +881,50 @@ fn run_compile(
     let args = get_args(&mut config, &kerning_name)?;
     *CONFIG.write().unwrap() = args.clone();
     let _ = std::thread::spawn(move || {
-        // Delete the existing new folder
-        let font_dir = get_font_dir(COMPILED_FONT_NAME);
-        if font_dir.exists() {
-            match delete_font_dir(COMPILED_FONT_NAME) {
-                Ok(_) => {}
-                Err(e) => {
-                    app.emit(
-                        "error",
-                        format!("Error in deleting font {}: {:?}", COMPILED_FONT_NAME, e),
-                    )
-                    .unwrap();
-                    return;
+        let compile_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // Delete the existing generated font folder.
+            let font_dir = get_font_dir(COMPILED_FONT_NAME);
+            if font_dir.exists() {
+                if let Err(e) = delete_font_dir(COMPILED_FONT_NAME) {
+                    return Err(Error::Font(FontError {
+                        msg: format!(
+                            "Error deleting existing font '{}': {:?}",
+                            COMPILED_FONT_NAME, e
+                        ),
+                    }));
                 }
             }
-        }
-        match compile(&args, &glyph_set) {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("compile error: {:?}", e);
-                app.emit("error", format!("{:?}", e)).unwrap();
-                return;
+            compile(&args, &glyph_set)?;
+            make_woff2(&args)?;
+            copy_config_kern_glyph_files(
+                COMPILED_FONT_NAME,
+                &config_name,
+                &kerning_name,
+                &glyph_set,
+            );
+            Ok::<(), Error>(())
+        }));
+        match compile_result {
+            Ok(Ok(())) => {
+                let _ = app.emit("msg", "compile_ended");
+            }
+            Ok(Err(e)) => {
+                let _ = app.emit("error", format!("{:?}", e));
+            }
+            Err(panic_payload) => {
+                let panic_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                    (*s).to_string()
+                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic payload".to_string()
+                };
+                let _ = app.emit(
+                    "error",
+                    format!("Unexpected panic while compiling glyphs: {}", panic_msg),
+                );
             }
         }
-        if let Err(e) = make_woff2(&args) {
-            app.emit("error", format!("{:?}", e)).unwrap();
-            return;
-        }
-        copy_config_kern_glyph_files(COMPILED_FONT_NAME, &config_name, &kerning_name, &glyph_set);
-        app.emit("msg", "compile_ended").unwrap();
     });
     Ok(())
 }
