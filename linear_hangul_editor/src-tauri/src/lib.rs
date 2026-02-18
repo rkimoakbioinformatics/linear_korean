@@ -4,6 +4,7 @@ mod error;
 mod file;
 mod font;
 mod glyph;
+mod settings;
 mod structs;
 
 use crate::compose::*;
@@ -774,6 +775,16 @@ fn save_content(content: String, content_name: String) {
     f.write_all(bytes).unwrap();
 }
 
+#[tauri::command]
+fn get_setting(name: String) -> Result<Option<String>, Error> {
+    crate::settings::get_setting_value(&name)
+}
+
+#[tauri::command]
+fn set_setting(name: String, value: String) -> Result<(), Error> {
+    crate::settings::set_setting_value(&name, &value)
+}
+
 fn copy_config_kern_glyph_files(
     font_name: &str,
     config_name: &str,
@@ -867,6 +878,9 @@ pub fn run() {
             if let Err(e) = create_data_folders(&app_handle) {
                 eprintln!("warning: failed to initialize data folders: {:?}", e);
             }
+            if let Err(e) = crate::settings::init_settings_db() {
+                eprintln!("warning: failed to initialize settings db: {:?}", e);
+            }
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
@@ -897,6 +911,9 @@ pub fn run() {
             get_content_names,
             get_content,
             save_content,
+            // settings
+            get_setting,
+            set_setting,
             // font
             get_font_names,
             get_font_data,

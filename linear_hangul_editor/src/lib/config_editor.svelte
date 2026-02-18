@@ -46,6 +46,7 @@
 </script>
 
 <div class="">
+    <!--
     <div>
         <select bind:value={config_name} onchange={load_config_data}>
             {#each config_names as item}
@@ -54,13 +55,7 @@
         </select>
         <button onclick={load_config_data}>&#x1F504;</button>
     </div>
+    -->
     <textarea class="w-full h-64 p-2 border-1" bind:value={config_data}
     ></textarea>
 </div>
-
-<style lang="postcss">
-    @import "tailwindcss";
-    button {
-        @apply rounded-sm px-2 py-1 text-xs font-semibold text-white shadow-xs focus-visible:outline-2 focus-visible:outline-offset-2;
-    }
-</style>

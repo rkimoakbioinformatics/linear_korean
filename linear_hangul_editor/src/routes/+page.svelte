@@ -37,6 +37,91 @@
     let alert_dialog_open = $state(false);
     let alert_dialog_title = $state("Error");
     let alert_dialog_message = $state("");
+    let should_persist_ui_state = false;
+
+    const UI_SETTING_KEYS = {
+        char_size: "char_size",
+        content_name: "content_name",
+        char: "char",
+        fontname: "fontname",
+        tool_set_name: "tool_set_name",
+    };
+
+    /**
+     * @param {string} name
+     * @param {string} fallback
+     * @returns {Promise<string>}
+     */
+    async function get_setting_or_default(name, fallback) {
+        try {
+            let value = await invoke("get_setting", { name });
+            return value == null ? fallback : value;
+        } catch (e) {
+            console.warn(`get_setting failed for ${name}`, e);
+            return fallback;
+        }
+    }
+
+    /**
+     * @param {string} name
+     * @param {string} value
+     */
+    async function save_ui_setting(name, value) {
+        if (!should_persist_ui_state) {
+            return;
+        }
+        try {
+            await invoke("set_setting", { name, value });
+        } catch (e) {
+            console.warn(`set_setting failed for ${name}`, e);
+        }
+    }
+
+    async function load_persisted_ui_state() {
+        char_size = await get_setting_or_default(
+            UI_SETTING_KEYS.char_size,
+            char_size,
+        );
+        content_name = await get_setting_or_default(
+            UI_SETTING_KEYS.content_name,
+            content_name,
+        );
+        char = await get_setting_or_default(UI_SETTING_KEYS.char, char);
+        fontname = await get_setting_or_default(
+            UI_SETTING_KEYS.fontname,
+            fontname,
+        );
+        tool_set_name = await get_setting_or_default(
+            UI_SETTING_KEYS.tool_set_name,
+            tool_set_name,
+        );
+    }
+
+    $effect(() => {
+        void save_ui_setting(UI_SETTING_KEYS.char_size, String(char_size));
+    });
+
+    $effect(() => {
+        void save_ui_setting(
+            UI_SETTING_KEYS.content_name,
+            String(content_name),
+        );
+    });
+
+    $effect(() => {
+        void save_ui_setting(UI_SETTING_KEYS.char, String(char));
+    });
+
+    $effect(() => {
+        void save_ui_setting(UI_SETTING_KEYS.fontname, String(fontname));
+    });
+
+    $effect(() => {
+        void save_ui_setting(
+            UI_SETTING_KEYS.tool_set_name,
+            String(tool_set_name),
+        );
+    });
 
     /**
      * @param {any} error
@@ -151,12 +236,17 @@
         let menu = await Menu.new();
         menu.append(app_submenu);
         await menu.setAsAppMenu();
+        await load_persisted_ui_state();
         await get_tool_set_names(null);
+        if (tool_set_name != "" && tool_set_names.includes(tool_set_name)) {
+            await get_tool_set_data(null);
+        }
         await get_glyph_set_names(null);
         await get_font(null);
         await get_content_names(null);
         await get_content(null);
         await get_font_names(null);
+        should_persist_ui_state = true;
     });
 
     const unlisten = listen("msg", async function (/** @type {any} */ event) {
@@ -579,6 +669,7 @@
                 ></ConfigEditor>
             </div>
             <div class="flex flex-col">
+                <!--
                 <div class="flex items-center">
                     <span>Glyph Set</span>
                     <select bind:value={glyph_set} onchange={change_glyph_set}>
@@ -603,6 +694,7 @@
                         &#x1F5D1;
                     </button>
                 </div>
+                -->
                 <div class="flex flex-col">
                     <GlyphDataEditor bind:this={glyph_data_editor_1} {glyph_set}
                     ></GlyphDataEditor>

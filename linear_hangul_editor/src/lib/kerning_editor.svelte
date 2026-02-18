@@ -43,9 +43,31 @@
         kerning_name = target_kerning_name;
         await getKerningNames(null);
     }
+
+    /**
+     * @param {any} event
+     */
+    function sort_kerning_rows(event) {
+        const hasTrailingNewline = /\r?\n$/.test(kerning_data);
+        const rows = kerning_data.split(/\r?\n/);
+        if (hasTrailingNewline) {
+            rows.pop();
+        }
+        rows.sort((a, b) => a.localeCompare(b));
+        kerning_data = rows.join("\n");
+        if (hasTrailingNewline) {
+            kerning_data += "\n";
+        }
+    }
 </script>
 
 <div class="">
+    <div class="mb-2">
+        <button class="px-2 py-1 border-1" onclick={sort_kerning_rows}
+            >Sort</button
+        >
+    </div>
+    <!--
     <div>
         <select bind:value={kerning_name} onchange={load_kerning_data}>
             {#each kerning_names as item}
@@ -54,13 +76,7 @@
         </select>
         <button onclick={load_kerning_data}>&#x1F504;</button>
     </div>
+    -->
     <textarea class="w-full h-64 p-2 border-1" bind:value={kerning_data}
     ></textarea>
 </div>
-
-<style lang="postcss">
-    @import "tailwindcss";
-    button {
-        @apply rounded-sm px-2 py-1 text-xs font-semibold text-white shadow-xs focus-visible:outline-2 focus-visible:outline-offset-2;
-    }
-</style>
