@@ -244,7 +244,7 @@
             return;
         }
 
-        if (event.shiftKey && key == "c") {
+        if (event.metaKey && event.shiftKey && key == "c") {
             event.preventDefault();
             void compile(event);
             return;
