@@ -1,1 +1,89 @@
-@import 'tailwindcss'
+@import "tailwindcss";
+
+:root {
+  --background: 0 0% 99%;
+  --foreground: 222.2 47.4% 11.2%;
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 47.4% 11.2%;
+  --muted: 210 40% 96.1%;
+  --muted-foreground: 215.4 16.3% 46.9%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --primary: 221.2 83.2% 53.3%;
+  --primary-foreground: 210 40% 98%;
+  --accent: 212 95% 94%;
+  --accent-foreground: 222.2 47.4% 11.2%;
+}
+
+.dark {
+  --background: 222.2 47.4% 7.5%;
+  --foreground: 210 40% 98%;
+  --card: 222.2 47.4% 10.6%;
+  --card-foreground: 210 40% 98%;
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;
+  --border: 217.2 32.6% 20%;
+  --input: 217.2 32.6% 20%;
+  --primary: 217.2 91.2% 59.8%;
+  --primary-foreground: 222.2 47.4% 11.2%;
+  --accent: 217.2 32.6% 23%;
+  --accent-foreground: 210 40% 98%;
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family:
+      "IBM Plex Sans", "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif;
+  }
+}
+
+@layer components {
+  .ui-card {
+    @apply rounded-xl border bg-[hsl(var(--card))] text-[hsl(var(--card-foreground))] shadow-sm;
+  }
+
+  .ui-label {
+    @apply text-xs font-semibold tracking-wide text-[hsl(var(--muted-foreground))] uppercase;
+  }
+
+  .ui-input,
+  .ui-select {
+    @apply h-9 rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] px-3 text-sm text-[hsl(var(--foreground))] outline-none transition;
+  }
+
+  .ui-input:focus,
+  .ui-select:focus {
+    @apply ring-2 ring-[hsl(var(--primary))] ring-offset-2 ring-offset-[hsl(var(--background))];
+  }
+
+  .ui-button {
+    @apply inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium transition-colors;
+  }
+
+  .ui-button-primary {
+    @apply inline-flex h-9 items-center justify-center rounded-md bg-[hsl(var(--primary))] px-3 text-sm font-medium text-[hsl(var(--primary-foreground))] transition-colors hover:opacity-90;
+  }
+
+  .ui-button-secondary {
+    @apply inline-flex h-9 items-center justify-center rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--card))] px-3 text-sm font-medium transition-colors hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--accent-foreground))];
+  }
+
+  .ui-button-ghost {
+    @apply inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium transition-colors hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--accent-foreground))];
+  }
+
+  .ui-kbd {
+    @apply rounded border border-[hsl(var(--input))] bg-[hsl(var(--muted))] px-1.5 py-0.5 text-[10px] font-medium text-[hsl(var(--muted-foreground))];
+  }
+}

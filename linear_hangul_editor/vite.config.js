@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
@@ -6,10 +7,7 @@ const host = process.env.TAURI_DEV_HOST;
 
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
-  plugins: [
-    tailwindcss(),
-    sveltekit(),
-  ],
+  plugins: [tailwindcss(), sveltekit()],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
@@ -18,9 +16,7 @@ export default defineConfig(async () => ({
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     fs: {
-      allow: [
-        "/Users/rick",
-      ],
+      allow: ["/Users/rick"],
     },
     port: 1420,
     strictPort: true,

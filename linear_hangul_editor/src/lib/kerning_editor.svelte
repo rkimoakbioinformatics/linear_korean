@@ -1,41 +1,62 @@
 <script>
+    // @ts-nocheck
     import { invoke } from "@tauri-apps/api/core";
     import { onMount } from "svelte";
+    import { StreamLanguage } from "@codemirror/language";
+    import { spreadsheet } from "@codemirror/legacy-modes/mode/spreadsheet";
+    import CodeEditor from "$lib/code_editor.svelte";
+
+    const CSV_LANGUAGE = StreamLanguage.define(spreadsheet);
+
     let kerning_data = $state("");
-    let /** @type {any} */ kerning_names = $state([]);
-    let { kerning_name = $bindable() } = $props();
+    let kerning_names = $state([]);
+    let { kerning_name = $bindable(), theme_mode = "light" } = $props();
+    let code_editor_ref = $state(null);
 
     onMount(async function () {
         await getKerningNames(null);
         await load_kerning_data(null);
     });
 
-    /**
-     * @param {any} event
-     */
     async function getKerningNames(event) {
         kerning_names = await invoke("get_kerning_names", {});
     }
 
-    /**
-     * @param {any} event
-     */
     export async function load_kerning_data(event) {
         kerning_data = await invoke("get_kerning_data", {
             kerningName: kerning_name,
         });
     }
 
-    /**
-     * @param {any} event
-     * @param {string | null} [next_kerning_name]
-     */
+    function sort_kerning_text(source) {
+        const has_trailing_newline = /\r?\n$/.test(source);
+        const rows = source
+            .split(/\r?\n/)
+            .map((line) => line.trimEnd())
+            .filter((line) => line != "");
+        rows.sort((a, b) => a.localeCompare(b));
+        let sorted = rows.join("\n");
+        if (has_trailing_newline && sorted != "") {
+            sorted += "\n";
+        }
+        return sorted;
+    }
+
+    export function focusEditor() {
+        code_editor_ref?.focusEditor();
+    }
+
+    function sort_kerning_rows(event) {
+        kerning_data = sort_kerning_text(kerning_data);
+    }
+
     export async function save(event, next_kerning_name = null) {
-        let target_kerning_name =
+        const target_kerning_name =
             next_kerning_name == null ? kerning_name : next_kerning_name.trim();
         if (target_kerning_name == "") {
             return;
         }
+        kerning_data = sort_kerning_text(kerning_data);
         await invoke("save_kerning_data", {
             kerningData: kerning_data,
             kerningName: target_kerning_name,
@@ -43,40 +64,23 @@
         kerning_name = target_kerning_name;
         await getKerningNames(null);
     }
-
-    /**
-     * @param {any} event
-     */
-    function sort_kerning_rows(event) {
-        const hasTrailingNewline = /\r?\n$/.test(kerning_data);
-        const rows = kerning_data.split(/\r?\n/);
-        if (hasTrailingNewline) {
-            rows.pop();
-        }
-        rows.sort((a, b) => a.localeCompare(b));
-        kerning_data = rows.join("\n");
-        if (hasTrailingNewline) {
-            kerning_data += "\n";
-        }
-    }
 </script>
 
-<div class="">
-    <div class="mb-2">
-        <button class="px-2 py-1 border-1" onclick={sort_kerning_rows}
+<div class="ui-card flex min-h-0 flex-1 flex-col p-3">
+    <div class="mb-2 flex items-center justify-between">
+        <div class="ui-label">Kerning Editor</div>
+        <!--<button class="ui-button ui-button-ghost text-xs" onclick={sort_kerning_rows}
             >Sort</button
-        >
+        >-->
     </div>
-    <!--
-    <div>
-        <select bind:value={kerning_name} onchange={load_kerning_data}>
-            {#each kerning_names as item}
-                <option value={item}>{item}</option>
-            {/each}
-        </select>
-        <button onclick={load_kerning_data}>&#x1F504;</button>
+    <div class="min-h-0 flex-1">
+        <CodeEditor
+            bind:this={code_editor_ref}
+            bind:value={kerning_data}
+            language_extension={CSV_LANGUAGE}
+            theme_mode={theme_mode}
+            min_height="13rem"
+            aria_label="Kerning editor"
+        />
     </div>
-    -->
-    <textarea class="w-full h-64 p-2 border-1" bind:value={kerning_data}
-    ></textarea>
 </div>

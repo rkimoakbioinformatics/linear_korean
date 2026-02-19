@@ -1,14 +1,97 @@
 <script>
+    // @ts-nocheck
     import { invoke } from "@tauri-apps/api/core";
-    let glyph_name = $state("");
+    import { StreamLanguage } from "@codemirror/language";
+    import { lua } from "@codemirror/legacy-modes/mode/lua";
+    import CodeEditor from "$lib/code_editor.svelte";
+    import initStylua, {
+        format as styluaFormat,
+        IndentType,
+        LineEndings,
+        OutputVerification,
+        QuoteStyle,
+    } from "stylua-wasm";
+    import styluaWasmUrl from "stylua-wasm/stylua_wasm_bg.wasm?url";
+
+    const LUA_LANGUAGE = StreamLanguage.define(lua);
+
+    const GLYPH_OPTIONS = [
+        { value: "gieug", label: "ㄱ" },
+        { value: "ssang_gieug", label: "ㄲ" },
+        { value: "nieun", label: "ㄴ" },
+        { value: "dieud", label: "ㄷ" },
+        { value: "ssang_dieud", label: "ㄸ" },
+        { value: "lieul", label: "ㄹ" },
+        { value: "mieum", label: "ㅁ" },
+        { value: "bieub", label: "ㅂ" },
+        { value: "ssang_bieub", label: "ㅃ" },
+        { value: "sieus", label: "ㅅ" },
+        { value: "ssang_sieus", label: "ㅆ" },
+        { value: "ieung", label: "ㅇ" },
+        { value: "yesieung", label: "iㅇ" },
+        { value: "jieuj", label: "ㅈ" },
+        { value: "ssang_jieuj", label: "ㅉ" },
+        { value: "chieuch", label: "ㅊ" },
+        { value: "kieuk", label: "ㅋ" },
+        { value: "tieut", label: "ㅌ" },
+        { value: "pieup", label: "ㅍ" },
+        { value: "hieuh", label: "ㅎ" },
+        { value: "a", label: "ㅏ" },
+        { value: "ya", label: "ㅑ" },
+        { value: "eo", label: "ㅓ" },
+        { value: "yeo", label: "ㅕ" },
+        { value: "o", label: "ㅗ" },
+        { value: "yo", label: "ㅛ" },
+        { value: "u", label: "ㅜ" },
+        { value: "yu", label: "ㅠ" },
+        { value: "eu", label: "ㅡ" },
+        { value: "i", label: "ㅣ" },
+        { value: "ae", label: "ㅐ" },
+        { value: "eoe", label: "ㅔ" },
+        { value: "yeoe", label: "ㅖ" },
+        { value: "yae", label: "ㅒ" },
+    ];
+
+    let glyph_name = $state("gieug");
     let glyph_data = $state("");
     let prev_glyph_name = $state("");
     let loaded_glyph_set = $state("");
-    let { glyph_set } = $props();
+    let stylua_init_promise = null;
 
-    /**
-     * @param {any} event
-     */
+    let {
+        glyph_set,
+        editor_label = "Glyph Editor",
+        theme_mode = "light",
+    } = $props();
+
+    let code_editor_ref = $state(null);
+    let glyph_selector_ref = $state(null);
+    const selector_id = $derived(
+        `glyph-selector-${editor_label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`,
+    );
+
+    async function ensure_stylua() {
+        if (!stylua_init_promise) {
+            stylua_init_promise = initStylua(styluaWasmUrl);
+        }
+        await stylua_init_promise;
+    }
+
+    async function format_glyph_lua(source) {
+        await ensure_stylua();
+        return styluaFormat(
+            source,
+            {
+                line_endings: LineEndings.Unix,
+                indent_type: IndentType.Spaces,
+                indent_width: 2,
+                quote_style: QuoteStyle.AutoPreferDouble,
+                column_width: 100,
+            },
+            OutputVerification.Full,
+        );
+    }
+
     async function loadGlyphData(event) {
         if (glyph_set == "" || glyph_name == "") {
             return;
@@ -33,11 +116,7 @@
         loaded_glyph_set = glyph_set;
     }
 
-    /**
-     * @param {any} event
-     */
     export async function loadGlyphDataWithoutSave(event) {
-        console.log("loading glyph_set:", glyph_set);
         if (glyph_set == "" || glyph_name == "") {
             return;
         }
@@ -49,11 +128,20 @@
         loaded_glyph_set = glyph_set;
     }
 
-    /**
-     * @param {any} event
-     */
+    export function focusEditor() {
+        code_editor_ref?.focusEditor();
+    }
+
+    export function focusGlyphSelector() {
+        if (!glyph_selector_ref) {
+            return;
+        }
+        glyph_selector_ref.focus();
+        glyph_selector_ref.click();
+    }
+
     export async function save(event) {
-        let target_glyph_set =
+        const target_glyph_set =
             loaded_glyph_set == "" ? glyph_set : loaded_glyph_set;
         if (
             target_glyph_set == "" ||
@@ -63,6 +151,7 @@
         ) {
             return;
         }
+        glyph_data = await format_glyph_lua(glyph_data);
         await invoke("save_glyph_data", {
             glyphSet: target_glyph_set,
             glyphName: glyph_name,
@@ -71,49 +160,29 @@
     }
 </script>
 
-<div class="">
-    <div>
-        <select bind:value={glyph_name} onchange={loadGlyphData}>
-            <option value="gieug">ㄱ</option>
-            <option value="ssang_gieug">ㄲ</option>
-            <option value="nieun">ㄴ</option>
-            <option value="dieud">ㄷ</option>
-            <option value="ssang_dieud">ㄸ</option>
-            <option value="lieul">ㄹ</option>
-            <option value="mieum">ㅁ</option>
-            <option value="bieub">ㅂ</option>
-            <option value="ssang_bieub">ㅃ</option>
-            <option value="sieus">ㅅ</option>
-            <option value="ssang_sieus">ㅆ</option>
-            <option value="ieung">ㅇ</option>
-            <option value="yesieung">iㅇ</option>
-            <option value="jieuj">ㅈ</option>
-            <option value="ssang_jieuj">ㅉ</option>
-            <option value="chieuch">ㅊ</option>
-            <option value="kieuk">ㅋ</option>
-            <option value="tieut">ㅌ</option>
-            <option value="pieup">ㅍ</option>
-            <option value="hieuh">ㅎ</option>
-            <option value="a">ㅏ</option>
-            <option value="ya">ㅑ</option>
-            <option value="eo">ㅓ</option>
-            <option value="yeo">ㅕ</option>
-            <option value="o">ㅗ</option>
-            <option value="yo">ㅛ</option>
-            <option value="u">ㅜ</option>
-            <option value="yu">ㅠ</option>
-            <option value="eu">ㅡ</option>
-            <option value="i">ㅣ</option>
-            <option value="ae">ㅐ</option>
-            <option value="eoe">ㅔ</option>
-            <option value="yeoe">ㅖ</option>
-            <option value="yae">ㅒ</option>
+<div class="ui-card flex min-h-0 flex-col p-3">
+    <div class="mb-2 flex items-center justify-between gap-2">
+        <label class="ui-label" for={selector_id}>{editor_label}</label>
+        <select
+            bind:this={glyph_selector_ref}
+            id={selector_id}
+            class="ui-select h-8 text-sm"
+            bind:value={glyph_name}
+            onchange={loadGlyphData}
+        >
+            {#each GLYPH_OPTIONS as option}
+                <option value={option.value}>{option.label}</option>
+            {/each}
         </select>
     </div>
-    <textarea class="w-full h-64 border-1 p-2" bind:value={glyph_data}
-    ></textarea>
+    <div class="min-h-0 flex-1">
+        <CodeEditor
+            bind:this={code_editor_ref}
+            bind:value={glyph_data}
+            language_extension={LUA_LANGUAGE}
+            theme_mode={theme_mode}
+            min_height="13rem"
+            aria_label={`${editor_label} lua editor`}
+        />
+    </div>
 </div>
-
-<style lang="postcss">
-    @import "tailwindcss";
-</style>
