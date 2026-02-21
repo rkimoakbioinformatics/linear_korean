@@ -13,7 +13,6 @@ use write_fonts::tables::cmap::EncodingRecord;
 use write_fonts::tables::glyf::Glyph;
 use write_fonts::tables::maxp::Maxp;
 use write_fonts::tables::name::NameRecord;
-use write_fonts::tables::post::Post;
 use write_fonts::tables::vmtx::LongMetric;
 use write_fonts::types::FWord;
 use write_fonts::types::LongDateTime;
@@ -314,7 +313,7 @@ pub fn handle_no_source(
             }
         }
     }
-    let glyph_name_strs: Vec<&str> = glyph_names.iter().map(|v| v.as_str()).collect();
+
     //font_tables.post = write_fonts::tables::post::Post::new_v2(glyph_name_strs);
     font_tables.post = write_fonts::tables::post::Post::new(
         write_fonts::types::Fixed::from_i32(0),
@@ -629,17 +628,6 @@ pub fn get_font_tables_and_builder<'a>(
     Ok((font_tables, builder))
 }
 
-pub fn modify_post(font_tables: &mut FontTables) {
-    /*
-    let glyph_names: Vec<&str> = font_tables.glyph_names.iter().map(|v| v.as_str()).collect();
-    let mut post = Post::new_v2(glyph_names);
-    post.max_mem_type42 = 0;
-    post.max_mem_type1 = 0;
-    post.is_fixed_pitch = 0;
-    font_tables.post = post;
-    */
-}
-
 pub fn modify_maxp_with_simple_glyphs(maxp: &mut Maxp, glyphs: &HashMap<u16, Glyph>) {
     let num_glyphs = glyphs.len() as u16;
     maxp.num_glyphs = num_glyphs;
@@ -729,15 +717,6 @@ pub fn modify_maxp(font_tables: &mut FontTables) {
     font_tables.maxp.max_composite_contours = Some(max_composite_contours);
     font_tables.maxp.max_component_elements = Some(max_component_elements);
     font_tables.maxp.max_component_depth = Some(max_component_depth);
-}
-
-pub fn modify_name(font_tables: &mut FontTables) -> Result<(), Error> {
-    /*let name = &mut font_tables.name;
-    for item in name.name_record.iter_mut() {
-        item.platform_id =
-        item.language_id = 23;
-    }*/
-    Ok(())
 }
 
 pub fn modify_head_hhea(font_tables: &mut FontTables) -> Result<(), Error> {

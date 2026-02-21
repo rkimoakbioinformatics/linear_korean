@@ -39,11 +39,8 @@ pub fn compile(args: &Args, glyph_set: &str) -> Result<(), Error> {
     let (mut font_tables, builder) = get_font_tables_and_builder(&font_bytes, glyph_set)?;
     make_compatibility_jamos(&mut font_tables)?;
     generate_hangul_composite_glyphs(&mut font_tables)?;
-    //add_eng_font(&mut font_tables);
-    modify_post(&mut font_tables);
     modify_maxp(&mut font_tables);
     modify_head_hhea(&mut font_tables)?;
-    modify_name(&mut font_tables)?;
     let font_data = build_font_data(&font_tables, builder);
     let p = get_font_ttf_p(&args.target_fontname);
     let dir = match p.parent() {
