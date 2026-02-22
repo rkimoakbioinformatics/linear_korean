@@ -213,7 +213,7 @@ pub fn make_compatibility_jamos(font_tables: &mut FontTables) -> Result<(), Erro
             chosung_codepoints,
             jungsung_codepoints,
             jongsung_codepoints,
-            false,
+            true,
             None,
         )?;
     }

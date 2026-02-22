@@ -60,6 +60,17 @@ pub fn collect_glyphs(
     } else {
         (None, None)
     };
+    let mut glyph_codepoint_aliases: Vec<Vec<u16>> =
+        vec![Vec::new(); font_tables.maxp.num_glyphs as usize];
+    for (codepoint, glyph_id) in font_tables.codepoint_to_glyph_id.iter() {
+        let glyph_id = *glyph_id as usize;
+        if glyph_id < glyph_codepoint_aliases.len() {
+            glyph_codepoint_aliases[glyph_id].push(*codepoint);
+        }
+    }
+    for aliases in glyph_codepoint_aliases.iter_mut() {
+        aliases.sort_unstable();
+    }
     for glyph_id in 0..font_tables.maxp.num_glyphs as usize {
         if space_glyph_id == Some(glyph_id as u16) {
             if let Some(space_glyph) = created_glyphs.get(&32) {
@@ -69,14 +80,16 @@ pub fn collect_glyphs(
                 continue;
             }
         }
-        let mut codepoint: u16 = u16::MAX;
-        for (c, gid) in font_tables.codepoint_to_glyph_id.iter() {
-            if *gid == glyph_id as u16 {
-                codepoint = *c;
-                break;
-            }
-        }
-        if created_glyphs.contains_key(&codepoint) {
+        let aliases = &glyph_codepoint_aliases[glyph_id];
+        let created_codepoint = aliases
+            .iter()
+            .copied()
+            .find(|codepoint| created_glyphs.contains_key(codepoint));
+        let codepoint = match created_codepoint {
+            Some(v) => v,
+            None => aliases.first().copied().unwrap_or(u16::MAX),
+        };
+        if let Some(codepoint) = created_codepoint {
             let g = created_glyphs.get(&codepoint).unwrap();
             if codepoint == 32 {
                 let advance = resolve_space_advance(args);

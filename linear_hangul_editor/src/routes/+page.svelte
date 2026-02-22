@@ -1925,6 +1925,7 @@
                 <textarea
                     class="h-44 resize-none rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] p-3"
                     bind:value={content}
+                    style:font-size={char_size + "px"}
                 ></textarea>
             </div>
         </div>

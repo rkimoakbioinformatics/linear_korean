@@ -222,9 +222,13 @@ pub fn get_font_kerning_p(font_name: &str) -> PathBuf {
 pub fn get_font_data(font_name: &str) -> Vec<u8> {
     let mut data: Vec<u8> = Vec::with_capacity(1024 * 1024);
     let mut p = get_font_dir(font_name);
-    p.push(format!("{}.woff2", font_name));
+    p.push(format!("{}.ttf", font_name));
     if !p.exists() {
-        return data;
+        p = get_font_dir(font_name);
+        p.push(format!("{}.woff2", font_name));
+        if !p.exists() {
+            return data;
+        }
     }
     let mut f = std::fs::File::open(&p).unwrap();
     f.read_to_end(&mut data).unwrap();

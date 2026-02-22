@@ -234,9 +234,9 @@
                 </div>
             </div>
 
-            <div class="grid min-h-0 flex-1 grid-cols-1 gap-3 pt-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
-                <div class="flex min-h-0 flex-col gap-3">
-                    <div class="ui-card flex min-h-0 flex-1 flex-col p-3">
+            <div class="grid min-h-0 flex-1 grid-cols-1 gap-3 pt-3 xl:grid-cols-[16rem_1fr]">
+                <div class="grid h-full gap-3">
+                    <div class="ui-card flex min-h-0 flex-col p-3">
                         <div class="ui-label mb-2">Evolution Config Editor</div>
                         <textarea
                             class="h-full min-h-0 flex-1 resize-none rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] p-3 font-mono text-xs"
@@ -244,27 +244,25 @@
                             oninput={cache_current_evolution_draft}
                         ></textarea>
                     </div>
-                    <div class="grid min-h-96 grid-cols-1 gap-3 lg:grid-cols-2">
-                        <div class="ui-card flex min-h-0 flex-col p-3">
-                            <div class="ui-label mb-2">Variant Kerning</div>
-                            <textarea
-                                class="h-44 min-h-0 flex-1 resize-none rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] p-3 font-mono text-xs"
-                                bind:value={evolution_selected_kerning_data}
-                                oninput={(event) => cache_selected_variant_draft("kerning", event)}
-                            ></textarea>
-                        </div>
-                        <div class="ui-card flex min-h-0 flex-col p-3">
-                            <div class="ui-label mb-2">Variant Config</div>
-                            <textarea
-                                class="h-44 min-h-0 flex-1 resize-none rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] p-3 font-mono text-xs"
-                                bind:value={evolution_selected_config_data}
-                                oninput={(event) => cache_selected_variant_draft("config", event)}
-                            ></textarea>
-                        </div>
+                    <div class="ui-card flex min-h-0 flex-col p-3">
+                        <div class="ui-label mb-2">Variant Kerning</div>
+                        <textarea
+                            class="h-44 min-h-0 flex-1 resize-none rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] p-3 font-mono text-xs"
+                            bind:value={evolution_selected_kerning_data}
+                            oninput={(event) => cache_selected_variant_draft("kerning", event)}
+                        ></textarea>
+                    </div>
+                    <div class="ui-card flex min-h-0 flex-col p-3">
+                        <div class="ui-label mb-2">Variant Config</div>
+                        <textarea
+                            class="h-44 min-h-0 flex-1 resize-none rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] p-3 font-mono text-xs"
+                            bind:value={evolution_selected_config_data}
+                            oninput={(event) => cache_selected_variant_draft("config", event)}
+                        ></textarea>
                     </div>
                 </div>
 
-                <div class="ui-card flex min-h-0 flex-col p-3">
+                <div class="ui-card flex flex-col p-3">
                     <div class="mb-2 flex items-center justify-between">
                         <div class="ui-label">Renderings</div>
                         <div class="text-xs text-[hsl(var(--muted-foreground))]">Generation {evolution_generation}</div>

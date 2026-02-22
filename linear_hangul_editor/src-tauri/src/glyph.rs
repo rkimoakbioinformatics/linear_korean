@@ -1001,11 +1001,11 @@ pub fn make_glyph(
     let args = &*CONFIG
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let mut y_min: i16 = 0;
-    let mut y_max: i16 = 0;
     let codepoint = chosung_codepoints[0];
     let (component, bbox, mut advance, side_bearing) =
         get_first_chosung_component_bbox(codepoint, font_tables)?;
+    let mut y_min: i16 = bbox.y_min;
+    let mut y_max: i16 = bbox.y_max;
     let mut x_max: i16 = bbox.x_max;
     let mut glyph = CompositeGlyph::new(component, bbox);
     if chosung_codepoints.len() > 1 {
@@ -1086,6 +1086,26 @@ pub fn make_glyph(
                 }),
             }));
         }
+    }
+    if let Some(existing_glyph_id) = font_tables.codepoint_to_glyph_id.get(&target_codepoint) {
+        let glyph_index = *existing_glyph_id as usize;
+        if glyph_index >= font_tables.glyphs.len() {
+            let msg = format!(
+                "Glyph ID {} for codepoint {:x} is out of glyph table bounds",
+                existing_glyph_id, target_codepoint
+            );
+            return Err(Error::Glyph(GlyphError { msg }));
+        }
+        if glyph_index >= font_tables.hmtx.h_metrics.len() {
+            let msg = format!(
+                "Glyph ID {} for codepoint {:x} is out of hmtx bounds",
+                existing_glyph_id, target_codepoint
+            );
+            return Err(Error::Glyph(GlyphError { msg }));
+        }
+        font_tables.glyphs[glyph_index] = Glyph::Composite(glyph);
+        font_tables.hmtx.h_metrics[glyph_index] = LongMetric::new(advance, side_bearing);
+        return Ok(());
     }
     let new_glyph_id = u16::try_from(font_tables.glyphs.len())
         .map_err(|_| overflow_font_error("glyph count exceeds u16"))?;
