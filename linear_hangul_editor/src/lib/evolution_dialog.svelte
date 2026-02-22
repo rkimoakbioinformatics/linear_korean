@@ -90,14 +90,17 @@
         evolution_config_names = [],
         evolution_config_name = $bindable(""),
         evolution_config_data = $bindable(""),
+        content_names = [],
+        content_name = $bindable(""),
         evolution_generation = 0,
         evolution_base_rendering = 0,
         evolution_selected_rendering = 0,
         evolution_renderings = [],
         evolution_selected_config_data = $bindable(""),
         evolution_selected_kerning_data = $bindable(""),
-        char_size = "16",
+        char_size = $bindable("16"),
         collision_check_enabled = $bindable(true),
+        get_content = () => {},
         get_evolution_config_data = () => {},
         save_evolution_config_same_name = () => {},
         save_evolution_config_as = () => {},
@@ -130,17 +133,37 @@
     <div class="fixed inset-0 z-[55] flex items-center justify-center bg-black/50 p-3">
         <div class="ui-card flex h-[92vh] w-full max-w-[96rem] min-h-0 flex-col p-3">
             <div class="flex flex-wrap items-end justify-between gap-3 border-b border-[hsl(var(--border))] pb-3">
-                <div class="space-y-1">
-                    <div class="ui-label">Evolution Config</div>
-                    <select
-                        class="ui-select min-w-[14rem]"
-                        bind:value={evolution_config_name}
-                        onchange={get_evolution_config_data}
-                    >
-                        {#each evolution_config_names as item}
-                            <option value={item}>{item}</option>
-                        {/each}
-                    </select>
+                <div class="flex flex-wrap items-end gap-3">
+                    <div class="space-y-1">
+                        <div class="ui-label">Evolution Config</div>
+                        <select
+                            class="ui-select min-w-[14rem]"
+                            bind:value={evolution_config_name}
+                            onchange={get_evolution_config_data}
+                        >
+                            {#each evolution_config_names as item}
+                                <option value={item}>{item}</option>
+                            {/each}
+                        </select>
+                    </div>
+                    <div class="space-y-1">
+                        <div class="ui-label">Content</div>
+                        <select class="ui-select min-w-[11rem]" bind:value={content_name} onchange={get_content}>
+                            {#each content_names as item}
+                                <option value={item}>{item}</option>
+                            {/each}
+                        </select>
+                    </div>
+                    <div class="space-y-1">
+                        <div class="ui-label">Font Size</div>
+                        <select class="ui-select min-w-[5.5rem]" bind:value={char_size}>
+                            <option value="16">16</option>
+                            <option value="24">24</option>
+                            <option value="48">48</option>
+                            <option value="64">64</option>
+                            <option value="128">128</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
                     <button

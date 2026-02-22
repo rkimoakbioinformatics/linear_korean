@@ -2019,6 +2019,8 @@
         evolution_config_names={evolution_config_names}
         bind:evolution_config_name
         bind:evolution_config_data
+        content_names={content_names}
+        bind:content_name
         evolution_generation={evolution_generation}
         evolution_base_rendering={evolution_base_rendering}
         evolution_selected_rendering={evolution_selected_rendering}
@@ -2027,7 +2029,8 @@
         bind:evolution_selected_kerning_data
         bind:collision_check_enabled
         evolve_disabled={!ready_to_compile}
-        {char_size}
+        bind:char_size
+        {get_content}
         {get_evolution_config_data}
         {save_evolution_config_same_name}
         {save_evolution_config_as}
