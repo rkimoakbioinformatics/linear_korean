@@ -17,6 +17,66 @@ use write_fonts::tables::glyf::Glyph;
 use write_fonts::tables::glyf::SimpleGlyph;
 use write_fonts::tables::hmtx::LongMetric;
 
+fn overflow_font_error(context: &str) -> Error {
+    Error::Font(FontError {
+        msg: format!("Numeric overflow while generating glyphs ({})", context),
+    })
+}
+
+fn lua_error(context: &str, err: impl std::fmt::Debug) -> Error {
+    Error::Glyph(GlyphError {
+        msg: format!("Lua error while {}: {:?}", context, err),
+    })
+}
+
+fn set_lua_i16(lua: &Lua, key: &str, value: i16) -> Result<(), Error> {
+    lua.globals()
+        .set(key, value)
+        .map_err(|e| lua_error(&format!("setting {}", key), e))
+}
+
+fn checked_i16_add(a: i16, b: i16, context: &str) -> Result<i16, Error> {
+    a.checked_add(b).ok_or_else(|| overflow_font_error(context))
+}
+
+fn checked_i16_sub(a: i16, b: i16, context: &str) -> Result<i16, Error> {
+    a.checked_sub(b).ok_or_else(|| overflow_font_error(context))
+}
+
+fn checked_i16_mul(a: i16, b: i16, context: &str) -> Result<i16, Error> {
+    a.checked_mul(b).ok_or_else(|| overflow_font_error(context))
+}
+
+fn checked_f32_to_i16(value: f32, context: &str) -> Result<i16, Error> {
+    if !value.is_finite() {
+        return Err(overflow_font_error(context));
+    }
+    let rounded = value.round();
+    if rounded < i16::MIN as f32 || rounded > i16::MAX as f32 {
+        return Err(overflow_font_error(context));
+    }
+    Ok(rounded as i16)
+}
+
+fn scaled_delta_with_baseline(
+    top: i16,
+    baseline: i16,
+    ratio: f32,
+    context: &str,
+) -> Result<i16, Error> {
+    let delta = i32::from(top) - i32::from(baseline);
+    let value = delta as f32 * ratio + baseline as f32;
+    checked_f32_to_i16(value, context)
+}
+
+fn checked_u16_add(a: u16, b: u16, context: &str) -> Result<u16, Error> {
+    a.checked_add(b).ok_or_else(|| overflow_font_error(context))
+}
+
+fn checked_u16_to_i16(value: u16, context: &str) -> Result<i16, Error> {
+    i16::try_from(value).map_err(|_| overflow_font_error(context))
+}
+
 pub fn get_glyph_def(glyph_set: &str, glyph_name: &str) -> Result<String, Error> {
     let mut p = get_glyph_set_dir(glyph_set);
     p.push(format!("{}.lua", glyph_name));
@@ -48,7 +108,7 @@ pub fn create_simple_glyph(
     lua: &Lua,
 ) -> Result<SimpleGlyph, Error> {
     let curves: Vec<Vec<(i16, i16, bool)>> = get_glyph_curves(glyph_set, glyph_name, lua, &sung)?;
-    let glyph = create_glyph_with_points(curves.clone(), &sung);
+    let glyph = create_glyph_with_points(curves, &sung)?;
     Ok(glyph)
 }
 
@@ -58,22 +118,24 @@ pub fn get_glyph_curves(
     lua: &Lua,
     sung: &Sung,
 ) -> Result<Vec<Vec<(i16, i16, bool)>>, Error> {
-    let args = &*CONFIG.read().unwrap();
-    lua.globals().set("X_SW", args.x_sw).unwrap();
-    lua.globals().set("Y_SW", args.y_sw).unwrap();
+    let args = &*CONFIG
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    set_lua_i16(lua, "X_SW", args.x_sw)?;
+    set_lua_i16(lua, "Y_SW", args.y_sw)?;
     match sung {
         Sung::Cho => {
-            lua.globals().set("GLYPH_WIDTH", args.glyph_width).unwrap();
+            set_lua_i16(lua, "GLYPH_WIDTH", args.glyph_width)?;
             if args.cho_h_ratio < 0.0 {
-                lua.globals()
-                    .set(
-                        "BASELINE",
-                        ((args.cap_height - args.baseline) as f32 * args.cho_h_ratio * -1.0) as i16
-                            + args.baseline,
-                    )
-                    .unwrap();
-                lua.globals().set("X_HEIGHT", args.x_height).unwrap();
-                lua.globals().set("CAP_HEIGHT", args.cap_height).unwrap();
+                let baseline = scaled_delta_with_baseline(
+                    args.cap_height,
+                    args.baseline,
+                    args.cho_h_ratio * -1.0,
+                    "cho baseline",
+                )?;
+                set_lua_i16(lua, "BASELINE", baseline)?;
+                set_lua_i16(lua, "X_HEIGHT", args.x_height)?;
+                set_lua_i16(lua, "CAP_HEIGHT", args.cap_height)?;
             } else {
                 // A ratio of 0 means "full height" for Cho glyphs.
                 let cho_h_ratio = if args.cho_h_ratio == 0.0 {
@@ -81,93 +143,113 @@ pub fn get_glyph_curves(
                 } else {
                     args.cho_h_ratio
                 };
-                lua.globals().set("BASELINE", args.baseline).unwrap();
-                lua.globals()
-                    .set(
-                        "X_HEIGHT",
-                        ((args.x_height - args.baseline) as f32 * cho_h_ratio) as i16
-                            + args.baseline,
-                    )
-                    .unwrap();
-                lua.globals()
-                    .set(
-                        "CAP_HEIGHT",
-                        ((args.cap_height - args.baseline) as f32 * cho_h_ratio) as i16
-                            + args.baseline,
-                    )
-                    .unwrap();
+                set_lua_i16(lua, "BASELINE", args.baseline)?;
+                set_lua_i16(
+                    lua,
+                    "X_HEIGHT",
+                    scaled_delta_with_baseline(
+                        args.x_height,
+                        args.baseline,
+                        cho_h_ratio,
+                        "cho x_height",
+                    )?,
+                )?;
+                set_lua_i16(
+                    lua,
+                    "CAP_HEIGHT",
+                    scaled_delta_with_baseline(
+                        args.cap_height,
+                        args.baseline,
+                        cho_h_ratio,
+                        "cho cap_height",
+                    )?,
+                )?;
             }
         }
         Sung::Jung => {
-            lua.globals()
-                .set(
-                    "GLYPH_WIDTH",
-                    (args.glyph_width as f32 * args.jung_w_ratio) as i16,
-                )
-                .unwrap();
+            set_lua_i16(
+                lua,
+                "GLYPH_WIDTH",
+                checked_f32_to_i16(
+                    args.glyph_width as f32 * args.jung_w_ratio,
+                    "jung glyph width",
+                )?,
+            )?;
             if args.jung_h_ratio < 0.0 {
-                lua.globals()
-                    .set(
-                        "BASELINE",
-                        ((args.cap_height - args.baseline) as f32 * args.jung_h_ratio * -1.0)
-                            as i16
-                            + args.baseline,
-                    )
-                    .unwrap();
-                lua.globals().set("X_HEIGHT", args.x_height).unwrap();
-                lua.globals().set("CAP_HEIGHT", args.cap_height).unwrap();
+                let baseline = scaled_delta_with_baseline(
+                    args.cap_height,
+                    args.baseline,
+                    args.jung_h_ratio * -1.0,
+                    "jung baseline",
+                )?;
+                set_lua_i16(lua, "BASELINE", baseline)?;
+                set_lua_i16(lua, "X_HEIGHT", args.x_height)?;
+                set_lua_i16(lua, "CAP_HEIGHT", args.cap_height)?;
             } else {
-                lua.globals().set("BASELINE", args.baseline).unwrap();
-                lua.globals()
-                    .set(
-                        "X_HEIGHT",
-                        ((args.x_height - args.baseline) as f32 * args.jung_h_ratio) as i16
-                            + args.baseline,
-                    )
-                    .unwrap();
-                lua.globals()
-                    .set(
-                        "CAP_HEIGHT",
-                        ((args.cap_height - args.baseline) as f32 * args.jung_h_ratio) as i16
-                            + args.baseline,
-                    )
-                    .unwrap();
+                set_lua_i16(lua, "BASELINE", args.baseline)?;
+                set_lua_i16(
+                    lua,
+                    "X_HEIGHT",
+                    scaled_delta_with_baseline(
+                        args.x_height,
+                        args.baseline,
+                        args.jung_h_ratio,
+                        "jung x_height",
+                    )?,
+                )?;
+                set_lua_i16(
+                    lua,
+                    "CAP_HEIGHT",
+                    scaled_delta_with_baseline(
+                        args.cap_height,
+                        args.baseline,
+                        args.jung_h_ratio,
+                        "jung cap_height",
+                    )?,
+                )?;
             }
         }
         Sung::Jong => {
-            lua.globals()
-                .set(
-                    "GLYPH_WIDTH",
-                    (args.glyph_width as f32 * args.jong_w_ratio) as i16,
-                )
-                .unwrap();
+            set_lua_i16(
+                lua,
+                "GLYPH_WIDTH",
+                checked_f32_to_i16(
+                    args.glyph_width as f32 * args.jong_w_ratio,
+                    "jong glyph width",
+                )?,
+            )?;
             if args.jong_h_ratio < 0.0 {
-                lua.globals()
-                    .set(
-                        "BASELINE",
-                        ((args.cap_height - args.baseline) as f32 * args.jong_h_ratio * -1.0)
-                            as i16
-                            + args.baseline,
-                    )
-                    .unwrap();
-                lua.globals().set("X_HEIGHT", args.x_height).unwrap();
-                lua.globals().set("CAP_HEIGHT", args.cap_height).unwrap();
+                let baseline = scaled_delta_with_baseline(
+                    args.cap_height,
+                    args.baseline,
+                    args.jong_h_ratio * -1.0,
+                    "jong baseline",
+                )?;
+                set_lua_i16(lua, "BASELINE", baseline)?;
+                set_lua_i16(lua, "X_HEIGHT", args.x_height)?;
+                set_lua_i16(lua, "CAP_HEIGHT", args.cap_height)?;
             } else {
-                lua.globals().set("BASELINE", args.baseline).unwrap();
-                lua.globals()
-                    .set(
-                        "X_HEIGHT",
-                        ((args.x_height - args.baseline) as f32 * args.jong_h_ratio) as i16
-                            + args.baseline,
-                    )
-                    .unwrap();
-                lua.globals()
-                    .set(
-                        "CAP_HEIGHT",
-                        ((args.cap_height - args.baseline) as f32 * args.jong_h_ratio) as i16
-                            + args.baseline,
-                    )
-                    .unwrap();
+                set_lua_i16(lua, "BASELINE", args.baseline)?;
+                set_lua_i16(
+                    lua,
+                    "X_HEIGHT",
+                    scaled_delta_with_baseline(
+                        args.x_height,
+                        args.baseline,
+                        args.jong_h_ratio,
+                        "jong x_height",
+                    )?,
+                )?;
+                set_lua_i16(
+                    lua,
+                    "CAP_HEIGHT",
+                    scaled_delta_with_baseline(
+                        args.cap_height,
+                        args.baseline,
+                        args.jong_h_ratio,
+                        "jong cap_height",
+                    )?,
+                )?;
             }
         }
     }
@@ -208,13 +290,15 @@ pub fn get_glyph_curves(
 pub fn create_glyphs(glyph_set: &str) -> Result<HashMap<u16, Glyph>, Error> {
     use mlua::prelude::*;
     let lua = Lua::new();
-    let args = &*CONFIG.read().unwrap();
-    lua.globals().set("BASELINE", args.baseline).unwrap();
-    lua.globals().set("GLYPH_WIDTH", args.glyph_width).unwrap();
-    lua.globals().set("sw", args.sw).unwrap();
-    lua.globals().set("X_HEIGHT", args.x_height).unwrap();
-    lua.globals().set("CAP_HEIGHT", args.cap_height).unwrap();
-    lua.globals().set("MIN_GAP", args.min_gap).unwrap();
+    let args = &*CONFIG
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    set_lua_i16(&lua, "BASELINE", args.baseline)?;
+    set_lua_i16(&lua, "GLYPH_WIDTH", args.glyph_width)?;
+    set_lua_i16(&lua, "sw", args.sw)?;
+    set_lua_i16(&lua, "X_HEIGHT", args.x_height)?;
+    set_lua_i16(&lua, "CAP_HEIGHT", args.cap_height)?;
+    set_lua_i16(&lua, "MIN_GAP", args.min_gap)?;
     let mut m: HashMap<u16, Glyph> = HashMap::default();
     m.insert(32, Glyph::Empty);
     let glyph_names = [
@@ -271,11 +355,13 @@ pub fn create_glyphs(glyph_set: &str) -> Result<HashMap<u16, Glyph>, Error> {
     Ok(m)
 }
 
-pub fn add_underbar(contours: &mut Vec<Contour>, x_max: i16) {
+pub fn add_underbar(contours: &mut Vec<Contour>, x_max: i16) -> Result<(), Error> {
     use write_fonts::read::tables::glyf::CurvePoint;
-    let args = &*CONFIG.read().unwrap();
+    let args = &*CONFIG
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let top = args.underdot_y;
-    let bottom = top - args.sw;
+    let bottom = checked_i16_sub(top, args.sw, "underbar bottom")?;
     let curve = vec![
         CurvePoint {
             x: 0,
@@ -299,24 +385,35 @@ pub fn add_underbar(contours: &mut Vec<Contour>, x_max: i16) {
         },
     ];
     contours.push(curve.into());
+    Ok(())
 }
 
-pub fn add_underdot(contours: &mut Vec<Contour>, x_max: i16) {
+pub fn add_underdot(contours: &mut Vec<Contour>, x_max: i16) -> Result<(), Error> {
     use write_fonts::read::tables::glyf::CurvePoint;
-    let args = &*CONFIG.read().unwrap();
+    let args = &*CONFIG
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let x_mid = x_max / 2;
-    let top_circle_r = (args.sw as f32 * args.underdot_r_ratio) as i16;
+    let top_circle_r =
+        checked_f32_to_i16(args.y_sw as f32 * args.underdot_r_ratio, "underdot radius")?;
     let top_circle_top = args.underdot_y;
-    let top_circle_bottom = top_circle_top - top_circle_r * 2;
-    let top_circle_x_c4 = x_mid + top_circle_r;
+    let top_circle_bottom = checked_i16_sub(
+        top_circle_top,
+        checked_i16_mul(top_circle_r, 2, "underdot radius * 2")?,
+        "underdot bottom",
+    )?;
+    let top_circle_x_c4 = checked_i16_add(x_mid, top_circle_r, "underdot c4 x")?;
     let top_circle_y_c4 = top_circle_bottom;
-    let top_circle_x_c3 = x_mid + top_circle_r;
+    let top_circle_x_c3 = checked_i16_add(x_mid, top_circle_r, "underdot c3 x")?;
     let top_circle_y_c3 = top_circle_top;
-    let top_circle_x_c2 = x_mid - top_circle_r;
+    let top_circle_x_c2 = checked_i16_sub(x_mid, top_circle_r, "underdot c2 x")?;
     let top_circle_y_c2 = top_circle_top;
-    let top_circle_x_c1 = x_mid - top_circle_r;
+    let top_circle_x_c1 = checked_i16_sub(x_mid, top_circle_r, "underdot c1 x")?;
     let top_circle_y_c1 = top_circle_bottom;
-    let top_circle_y_mid = top_circle_top - (top_circle_top - top_circle_bottom) / 2;
+    let top_circle_y_mid = checked_f32_to_i16(
+        (top_circle_top as f32 + top_circle_bottom as f32) / 2.0,
+        "underdot y mid",
+    )?;
     let curve = vec![
         CurvePoint {
             x: x_mid,
@@ -329,7 +426,7 @@ pub fn add_underdot(contours: &mut Vec<Contour>, x_max: i16) {
             on_curve: false,
         },
         CurvePoint {
-            x: x_mid - top_circle_r,
+            x: checked_i16_sub(x_mid, top_circle_r, "underdot left x")?,
             y: top_circle_y_mid,
             on_curve: true,
         },
@@ -349,7 +446,7 @@ pub fn add_underdot(contours: &mut Vec<Contour>, x_max: i16) {
             on_curve: false,
         },
         CurvePoint {
-            x: x_mid + top_circle_r,
+            x: checked_i16_add(x_mid, top_circle_r, "underdot right x")?,
             y: top_circle_y_mid,
             on_curve: true,
         },
@@ -365,24 +462,35 @@ pub fn add_underdot(contours: &mut Vec<Contour>, x_max: i16) {
         },
     ];
     contours.push(curve.into());
+    Ok(())
 }
 
-pub fn add_upperdot(contours: &mut Vec<Contour>, x_max: i16) {
+pub fn add_upperdot(contours: &mut Vec<Contour>, x_max: i16) -> Result<(), Error> {
     use write_fonts::read::tables::glyf::CurvePoint;
-    let args = &*CONFIG.read().unwrap();
+    let args = &*CONFIG
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let x_mid = x_max / 2;
-    let top_circle_r = (args.sw as f32 * args.upperdot_r_ratio) as i16;
+    let top_circle_r =
+        checked_f32_to_i16(args.sw as f32 * args.upperdot_r_ratio, "upperdot radius")?;
     let top_circle_top = args.upperdot_y;
-    let top_circle_bottom = top_circle_top - top_circle_r * 2;
-    let top_circle_x_c4 = x_mid + top_circle_r;
+    let top_circle_bottom = checked_i16_sub(
+        top_circle_top,
+        checked_i16_mul(top_circle_r, 2, "upperdot radius * 2")?,
+        "upperdot bottom",
+    )?;
+    let top_circle_x_c4 = checked_i16_add(x_mid, top_circle_r, "upperdot c4 x")?;
     let top_circle_y_c4 = top_circle_bottom;
-    let top_circle_x_c3 = x_mid + top_circle_r;
+    let top_circle_x_c3 = checked_i16_add(x_mid, top_circle_r, "upperdot c3 x")?;
     let top_circle_y_c3 = top_circle_top;
-    let top_circle_x_c2 = x_mid - top_circle_r;
+    let top_circle_x_c2 = checked_i16_sub(x_mid, top_circle_r, "upperdot c2 x")?;
     let top_circle_y_c2 = top_circle_top;
-    let top_circle_x_c1 = x_mid - top_circle_r;
+    let top_circle_x_c1 = checked_i16_sub(x_mid, top_circle_r, "upperdot c1 x")?;
     let top_circle_y_c1 = top_circle_bottom;
-    let top_circle_y_mid = top_circle_top - (top_circle_top - top_circle_bottom) / 2;
+    let top_circle_y_mid = checked_f32_to_i16(
+        (top_circle_top as f32 + top_circle_bottom as f32) / 2.0,
+        "upperdot y mid",
+    )?;
     let curve = vec![
         CurvePoint {
             x: x_mid,
@@ -395,7 +503,7 @@ pub fn add_upperdot(contours: &mut Vec<Contour>, x_max: i16) {
             on_curve: false,
         },
         CurvePoint {
-            x: x_mid - top_circle_r,
+            x: checked_i16_sub(x_mid, top_circle_r, "upperdot left x")?,
             y: top_circle_y_mid,
             on_curve: true,
         },
@@ -415,7 +523,7 @@ pub fn add_upperdot(contours: &mut Vec<Contour>, x_max: i16) {
             on_curve: false,
         },
         CurvePoint {
-            x: x_mid + top_circle_r,
+            x: checked_i16_add(x_mid, top_circle_r, "upperdot right x")?,
             y: top_circle_y_mid,
             on_curve: true,
         },
@@ -431,11 +539,17 @@ pub fn add_upperdot(contours: &mut Vec<Contour>, x_max: i16) {
         },
     ];
     contours.push(curve.into());
+    Ok(())
 }
 
-pub fn create_glyph_with_points(curves: Vec<Vec<(i16, i16, bool)>>, sung: &Sung) -> SimpleGlyph {
+pub fn create_glyph_with_points(
+    curves: Vec<Vec<(i16, i16, bool)>>,
+    sung: &Sung,
+) -> Result<SimpleGlyph, Error> {
     use write_fonts::read::tables::glyf::CurvePoint;
-    let args = &*CONFIG.read().unwrap();
+    let args = &*CONFIG
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut contours: Vec<Contour> = Vec::new();
     let mut x_max: i16 = 0;
     let mut y_max: i16 = 0;
@@ -460,40 +574,54 @@ pub fn create_glyph_with_points(curves: Vec<Vec<(i16, i16, bool)>>, sung: &Sung)
     match sung {
         Sung::Cho => {
             if args.cho_type & UNDERBAR != 0 {
-                add_underbar(&mut contours, x_max + args.cho_gap as i16);
+                let cho_gap_i16 = checked_u16_to_i16(args.cho_cho_gap, "cho_cho gap u16->i16")?;
+                add_underbar(
+                    &mut contours,
+                    checked_i16_add(x_max, cho_gap_i16, "cho underbar x_max")?,
+                )?;
             }
             if args.cho_type & UNDERDOT != 0 {
-                add_underdot(&mut contours, x_max);
+                add_underdot(&mut contours, x_max)?;
             }
             if args.cho_type & UPPERDOT != 0 {
-                add_upperdot(&mut contours, x_max);
+                add_upperdot(&mut contours, x_max)?;
             }
         }
         Sung::Jung => {
             if args.jung_type & UNDERBAR != 0 {
-                add_underbar(&mut contours, x_max + args.jung_gap as i16);
+                let jung_gap_i16 =
+                    checked_u16_to_i16(args.jung_jung_gap, "jung_jung gap u16->i16")?;
+                add_underbar(
+                    &mut contours,
+                    checked_i16_add(x_max, jung_gap_i16, "jung underbar x_max")?,
+                )?;
             }
             if args.jung_type & UNDERDOT != 0 {
-                add_underdot(&mut contours, x_max);
+                add_underdot(&mut contours, x_max)?;
             }
             if args.jung_type & UPPERDOT != 0 {
-                add_upperdot(&mut contours, x_max);
+                add_upperdot(&mut contours, x_max)?;
             }
         }
         Sung::Jong => {
             if args.jong_type & UNDERBAR != 0 {
-                add_underbar(&mut contours, x_max + args.jong_gap as i16);
+                let jong_gap_i16 =
+                    checked_u16_to_i16(args.jong_jong_gap, "jong_jong gap u16->i16")?;
+                add_underbar(
+                    &mut contours,
+                    checked_i16_add(x_max, jong_gap_i16, "jong underbar x_max")?,
+                )?;
             }
             if args.jong_type & UNDERDOT != 0 {
-                add_underdot(&mut contours, x_max);
+                add_underdot(&mut contours, x_max)?;
             }
             if args.jong_type & UPPERDOT != 0 {
-                add_upperdot(&mut contours, x_max);
+                add_upperdot(&mut contours, x_max)?;
             }
         }
     }
     let instructions = vec![];
-    SimpleGlyph {
+    Ok(SimpleGlyph {
         bbox: Bbox {
             x_min: 0,
             y_min: 0,
@@ -502,7 +630,7 @@ pub fn create_glyph_with_points(curves: Vec<Vec<(i16, i16, bool)>>, sung: &Sung)
         },
         contours,
         instructions,
-    }
+    })
 }
 
 pub fn get_glyph_id_of_codepoint(
@@ -561,7 +689,9 @@ pub fn make_glyph(
     do_not_add_char_gap: bool,
     collision_checker: Option<&mut CollisionChecker>,
 ) -> Result<(), Error> {
-    let args = &*CONFIG.read().unwrap();
+    let args = &*CONFIG
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut y_min: i16 = 0;
     let mut y_max: i16 = 0;
     let codepoint = chosung_codepoints[0];
@@ -581,6 +711,7 @@ pub fn make_glyph(
             Some(codepoint),
             &args,
             &Sung::Cho,
+            &Sung::Cho,
         )?;
     }
     add_components(
@@ -593,12 +724,18 @@ pub fn make_glyph(
         &mut advance,
         Some(chosung_codepoints[chosung_codepoints.len() - 1]),
         &args,
+        &Sung::Cho,
         &Sung::Jung,
     )?;
     let last_codepoint = if jungsung_codepoints.len() > 0 {
         jungsung_codepoints[jungsung_codepoints.len() - 1]
     } else {
         chosung_codepoints[chosung_codepoints.len() - 1]
+    };
+    let prev_sung_for_jong = if jungsung_codepoints.is_empty() {
+        Sung::Cho
+    } else {
+        Sung::Jung
     };
     add_components(
         &mut glyph,
@@ -610,10 +747,11 @@ pub fn make_glyph(
         &mut advance,
         Some(last_codepoint),
         &args,
+        &prev_sung_for_jong,
         &Sung::Jong,
     )?;
     if !do_not_add_char_gap {
-        advance += args.char_gap;
+        advance = checked_u16_add(advance, args.char_gap, "final char gap")?;
     }
     glyph.bbox.x_max = x_max;
     glyph.bbox.y_min = y_min;
@@ -640,7 +778,8 @@ pub fn make_glyph(
             }));
         }
     }
-    let new_glyph_id = font_tables.glyphs.len() as u16;
+    let new_glyph_id = u16::try_from(font_tables.glyphs.len())
+        .map_err(|_| overflow_font_error("glyph count exceeds u16"))?;
     font_tables
         .codepoint_to_glyph_id
         .insert(target_codepoint, new_glyph_id);
@@ -650,19 +789,22 @@ pub fn make_glyph(
             CmapSubtable::Format4(cmap4) => {
                 let num_ranges = cmap4.end_code.len();
                 let last_end_code = cmap4.end_code[num_ranges - 2];
-                if target_codepoint == last_end_code + 1 {
+                let last_end_plus_one = last_end_code.saturating_add(1);
+                if target_codepoint == last_end_plus_one {
                     cmap4.end_code[num_ranges - 2] = target_codepoint;
                 } else {
                     for i in 0..(num_ranges - 1) {
                         if cmap4.id_range_offsets[i] > 0 {
-                            cmap4.id_range_offsets[i] += 2;
+                            cmap4.id_range_offsets[i] = cmap4.id_range_offsets[i]
+                                .checked_add(2)
+                                .ok_or_else(|| overflow_font_error("cmap id_range_offsets + 2"))?;
                         }
                     }
                     cmap4.end_code.insert(num_ranges - 1, target_codepoint);
                     cmap4.start_code.insert(num_ranges - 1, target_codepoint);
                     cmap4.id_delta.insert(
                         num_ranges - 1,
-                        new_glyph_id as i16 - target_codepoint as i16,
+                        (new_glyph_id as i16).wrapping_sub(target_codepoint as i16),
                     );
                     cmap4.id_range_offsets.insert(num_ranges - 1, 0);
                 }

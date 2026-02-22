@@ -6,6 +6,8 @@
     import { Menu, Submenu, PredefinedMenuItem } from "@tauri-apps/api/menu";
     import JSON5 from "json5";
     import {
+        BookmarkPlus,
+        CopyPlus,
         FolderOpen,
         Hammer,
         Moon,
@@ -19,6 +21,10 @@
     import ConfigEditor from "$lib/config_editor.svelte";
     import KerningEditor from "$lib/kerning_editor.svelte";
     import EvolutionDialog from "$lib/evolution_dialog.svelte";
+
+    const EVOLUTION_MUTATION_COUNT = 8;
+    const EVOLUTION_SYSTEM_RENDERING_INDEX = 1;
+    const EVOLUTION_RENDERING_COUNT = EVOLUTION_MUTATION_COUNT + 2;
 
     let kerning_editor_ref = $state(null);
     let config_editor_ref = $state(null);
@@ -229,6 +235,11 @@
         alert_dialog_open = true;
     }
 
+    function handle_config_editor_error(title, message_text) {
+        error_msg = format_error_message(message_text);
+        open_alert_dialog(title, error_msg);
+    }
+
     function clear_collision_debug() {
         collision_debug_payload = null;
         collision_debug_image_url = "";
@@ -356,6 +367,40 @@
         return (content || "").slice(0, 200);
     }
 
+    function is_system_evolution_rendering(index) {
+        return index == EVOLUTION_SYSTEM_RENDERING_INDEX;
+    }
+
+    function evolution_backend_index_from_ui(index) {
+        if (typeof index != "number" || !Number.isFinite(index)) {
+            return null;
+        }
+        if (index < 0) {
+            return null;
+        }
+        if (is_system_evolution_rendering(index)) {
+            return null;
+        }
+        return index > EVOLUTION_SYSTEM_RENDERING_INDEX ? index - 1 : index;
+    }
+
+    function build_system_hangul_rendering(
+        text,
+        config_data = "",
+        kerning_data = "",
+        render_version = 0,
+    ) {
+        return {
+            label: "Standard System Hangul",
+            text,
+            font_family: "system-ui",
+            config_data,
+            kerning_data,
+            render_version,
+            is_system_font: true,
+        };
+    }
+
     function build_evolution_renderings(
         preview_text,
         generation,
@@ -366,16 +411,35 @@
             preview_text.length > 0
                 ? preview_text
                 : "No content is loaded. Select a content file to preview evolution renderings.";
-        return Array.from({ length: 10 }, (_, idx) => {
-            return {
-                label: idx == 0 ? "Original" : `Mutation ${idx} · G${generation}`,
+        const renderings = [
+            {
+                label: "Base Variant",
                 text,
                 font_family: "Linear Korean",
                 config_data: seed_config_data,
                 kerning_data: seed_kerning_data,
                 render_version: 0,
-            };
-        });
+                is_system_font: false,
+            },
+            build_system_hangul_rendering(
+                text,
+                seed_config_data,
+                seed_kerning_data,
+                generation,
+            ),
+        ];
+        for (let idx = 1; idx <= EVOLUTION_MUTATION_COUNT; idx += 1) {
+            renderings.push({
+                label: `Mutation ${idx} · G${generation}`,
+                text,
+                font_family: "Linear Korean",
+                config_data: seed_config_data,
+                kerning_data: seed_kerning_data,
+                render_version: 0,
+                is_system_font: false,
+            });
+        }
+        return renderings;
     }
 
     function sync_selected_variant_editors(index = evolution_selected_rendering) {
@@ -431,32 +495,57 @@
                 ? preview_text
                 : "No content is loaded. Select a content file to preview evolution renderings.";
         const items = Array.isArray(evolve_result?.items) ? evolve_result.items : [];
-        if (items.length != 10) {
+        if (items.length != EVOLUTION_MUTATION_COUNT + 1) {
             throw new Error(
-                `Invalid evolve response: expected 10 preview fonts, got ${items.length}.`,
+                `Invalid evolve response: expected ${EVOLUTION_MUTATION_COUNT + 1} preview fonts, got ${items.length}.`,
             );
         }
+        const original_item = items[0];
+        const original_config_data = String(original_item?.configData ?? "");
+        const original_kerning_data = String(original_item?.kerningData ?? "");
         if (typeof document == "undefined") {
-            return items.map((item, idx) => {
-                return {
+            const renderings = [
+                {
+                    label:
+                        typeof original_item?.label == "string" &&
+                        original_item.label.length > 0
+                            ? original_item.label
+                            : "Base Variant",
+                    text,
+                    font_family: "Linear Korean",
+                    config_data: original_config_data,
+                    kerning_data: original_kerning_data,
+                    render_version: generation,
+                    is_system_font: false,
+                },
+                build_system_hangul_rendering(
+                    text,
+                    original_config_data,
+                    original_kerning_data,
+                    generation,
+                ),
+            ];
+            for (let idx = 1; idx < items.length; idx += 1) {
+                const item = items[idx];
+                renderings.push({
                     label:
                         typeof item?.label == "string" && item.label.length > 0
                             ? item.label
-                            : idx == 0
-                              ? "Original"
-                              : `Mutation ${idx} · G${generation}`,
+                            : `Mutation ${idx} · G${generation}`,
                     text,
                     font_family: "Linear Korean",
                     config_data: String(item?.configData ?? ""),
                     kerning_data: String(item?.kerningData ?? ""),
                     render_version: generation,
-                };
-            });
+                    is_system_font: false,
+                });
+            }
+            return renderings;
         }
 
         clear_evolution_preview_fonts();
         const loaded_families = [];
-        const renderings = [];
+        const renderings = Array.from({ length: EVOLUTION_RENDERING_COUNT });
         for (let idx = 0; idx < items.length; idx += 1) {
             const item = items[idx];
             const font_name = String(item?.fontName ?? "").trim();
@@ -469,31 +558,42 @@
             if (!Array.isArray(font_data) || font_data.length == 0) {
                 throw new Error(`Generated evolution font '${font_name}' is empty.`);
             }
-            const family = get_evolution_preview_family(idx);
+            const ui_index = idx > 0 ? idx + 1 : idx;
+            const family = get_evolution_preview_family(ui_index);
             remove_font_faces_by_family(family);
             const font_face = new FontFace(family, new Uint8Array(font_data));
             await font_face.load();
             document.fonts.add(font_face);
             loaded_families.push(family);
-            renderings.push({
+            renderings[ui_index] = {
                 label:
                     typeof item?.label == "string" && item.label.length > 0
                         ? item.label
                         : idx == 0
-                          ? "Original"
+                          ? "Base Variant"
                           : `Mutation ${idx} · G${generation}`,
                 text,
                 font_family: family,
                 config_data: String(item?.configData ?? ""),
                 kerning_data: String(item?.kerningData ?? ""),
                 render_version: generation,
-            });
+                is_system_font: false,
+            };
         }
+        renderings[EVOLUTION_SYSTEM_RENDERING_INDEX] = build_system_hangul_rendering(
+            text,
+            original_config_data,
+            original_kerning_data,
+            generation,
+        );
         evolution_font_families = loaded_families;
         return renderings;
     }
 
     async function apply_evolution_rendering_item(index, item) {
+        if (is_system_evolution_rendering(index)) {
+            throw new Error("System Hangul rendering cannot be replaced.");
+        }
         const font_name = String(item?.fontName ?? "").trim();
         if (font_name == "") {
             throw new Error("Invalid evolve response item: missing font_name.");
@@ -662,6 +762,71 @@
         }
     }
 
+    async function rename_evolution_config() {
+        const previous_name = evolution_config_name.trim();
+        if (previous_name == "") {
+            return;
+        }
+        let next_evolution_name = await request_save_name(
+            "Rename evolution config",
+            previous_name,
+        );
+        if (next_evolution_name == null) {
+            return;
+        }
+        next_evolution_name = next_evolution_name.trim();
+        if (
+            next_evolution_name == "" ||
+            next_evolution_name == previous_name
+        ) {
+            return;
+        }
+        try {
+            await invoke("rename_evolution_config", {
+                oldName: previous_name,
+                newName: next_evolution_name,
+            });
+            const renamed_draft =
+                evolution_config_drafts[previous_name] ?? evolution_config_data;
+            const { [previous_name]: _discarded, ...remaining_drafts } =
+                evolution_config_drafts;
+            evolution_config_drafts = {
+                ...remaining_drafts,
+                [next_evolution_name]: renamed_draft,
+            };
+            evolution_config_name = next_evolution_name;
+            await get_evolution_config_names();
+            await get_evolution_config_data(true);
+        } catch (e) {
+            error_msg = format_error_message(e);
+            open_alert_dialog("Error", error_msg);
+        }
+    }
+
+    async function delete_evolution_config() {
+        const target_name = evolution_config_name.trim();
+        if (target_name == "") {
+            return;
+        }
+        try {
+            await invoke("delete_evolution_config", {
+                evolutionName: target_name,
+            });
+            const { [target_name]: _discarded, ...remaining_drafts } =
+                evolution_config_drafts;
+            evolution_config_drafts = remaining_drafts;
+            await get_evolution_config_names();
+            if (evolution_config_name.trim() == "") {
+                evolution_config_data = "";
+                return;
+            }
+            await get_evolution_config_data(true);
+        } catch (e) {
+            error_msg = format_error_message(e);
+            open_alert_dialog("Error", error_msg);
+        }
+    }
+
     async function open_evolution_dialog() {
         try {
             await get_evolution_config_names();
@@ -733,6 +898,12 @@
             await glyph_data_editor_1.save(null);
             await glyph_data_editor_2.save(null);
 
+            const resolved_seed_index = is_system_evolution_rendering(seed_index)
+                ? 0
+                : seed_index;
+            const seed_backend_index =
+                evolution_backend_index_from_ui(resolved_seed_index);
+            const seed_rendering = evolution_renderings[resolved_seed_index];
             const override_config_data = String(seed_override?.config_data ?? "");
             const override_kerning_data = String(seed_override?.kerning_data ?? "");
             const evolve_result = await invoke("evolve", {
@@ -743,20 +914,20 @@
                 content: preview_text,
                 checkCollision: collision_check_enabled,
                 sessionId: evolution_session_id,
-                seedIndex: seed_index,
+                seedIndex: seed_backend_index,
                 resetToRoot: reset_to_root,
                 seedConfigData:
                     !reset_to_root
                         ? (override_config_data != ""
                               ? override_config_data
-                              : (evolution_renderings[seed_index]?.config_data ??
+                              : (seed_rendering?.config_data ??
                                 evolution_selected_config_data))
                         : null,
                 seedKerningData:
                     !reset_to_root
                         ? (override_kerning_data != ""
                               ? override_kerning_data
-                              : (evolution_renderings[seed_index]?.kerning_data ??
+                              : (seed_rendering?.kerning_data ??
                                 evolution_selected_kerning_data))
                         : null,
             });
@@ -789,14 +960,20 @@
     }
 
     function choose_evolution_rendering(index) {
-        evolution_base_rendering = index;
         evolution_selected_rendering = index;
+        if (!is_system_evolution_rendering(index)) {
+            evolution_base_rendering = index;
+        }
         sync_selected_variant_editors(index);
     }
 
     function evolve_from_rendering(index) {
-        evolution_base_rendering = index;
         evolution_selected_rendering = index;
+        if (is_system_evolution_rendering(index)) {
+            sync_selected_variant_editors(index);
+            return;
+        }
+        evolution_base_rendering = index;
         sync_selected_variant_editors(index);
         void evolve_shell(index, false);
     }
@@ -812,6 +989,13 @@
             return;
         }
         if (index < 0 || index >= evolution_renderings.length) {
+            return;
+        }
+        if (is_system_evolution_rendering(index)) {
+            return;
+        }
+        const target_backend_index = evolution_backend_index_from_ui(index);
+        if (target_backend_index == null) {
             return;
         }
         const render_config_data = String(
@@ -856,7 +1040,7 @@
                 checkCollision: collision_check_enabled,
                 renderConfigData: render_config_data,
                 renderKerningData: render_kerning_data,
-                targetIndex: index,
+                targetIndex: target_backend_index,
                 generation: evolution_generation,
                 label: evolution_renderings[index]?.label ?? null,
             });
@@ -900,6 +1084,9 @@
             evolution_selected_rendering < 0 ||
             evolution_selected_rendering >= evolution_renderings.length
         ) {
+            return;
+        }
+        if (is_system_evolution_rendering(evolution_selected_rendering)) {
             return;
         }
         const selected = evolution_renderings[evolution_selected_rendering];
@@ -964,7 +1151,17 @@
         if (index < 0 || index >= evolution_renderings.length) {
             return;
         }
+        if (is_system_evolution_rendering(index)) {
+            return;
+        }
+        const target_backend_index = evolution_backend_index_from_ui(index);
+        if (target_backend_index == null) {
+            return;
+        }
 
+        if (is_system_evolution_rendering(evolution_base_rendering)) {
+            return;
+        }
         const base_rendering = evolution_renderings[evolution_base_rendering];
         const base_config_data = String(
             base_rendering?.config_data ?? evolution_selected_config_data ?? "",
@@ -997,7 +1194,7 @@
                 checkCollision: collision_check_enabled,
                 baseConfigData: base_config_data,
                 baseKerningData: base_kerning_data,
-                targetIndex: index,
+                targetIndex: target_backend_index,
                 generation: evolution_generation,
             });
             await apply_evolution_rendering_item(index, replacement_item);
@@ -1088,6 +1285,11 @@
                 void compile_content(event);
                 return;
             }
+            if (key == "e" && evolution_dialog_open) {
+                event.preventDefault();
+                void evolve_shell();
+                return;
+            }
             if (key == "t") {
                 event.preventDefault();
                 collision_check_enabled = !collision_check_enabled;
@@ -1169,7 +1371,10 @@
         const unlisten_msg = await listen("msg", async (event) => {
             if (event.payload == "compile_ended") {
                 clear_collision_debug();
-                fontname = "generated";
+                const next_font_name = await finalize_compiled_font_name();
+                if (next_font_name != "") {
+                    fontname = next_font_name;
+                }
                 await get_font(null);
                 await get_font_names(event);
                 ready_to_compile = true;
@@ -1253,6 +1458,12 @@
         await run_step(`Loading glyph set '${glyph_set}' in editor 2`, async () => {
             await glyph_data_editor_2.loadGlyphDataWithoutSave(event);
         });
+        await run_step(
+            `Switching to font '${tool_set_name}' when available`,
+            async () => {
+                await switch_font_to_tool_set_if_present();
+            },
+        );
 
         if (warnings.length > 0) {
             error_msg = warnings.join("\n\n");
@@ -1399,15 +1610,83 @@
         if (next_font_name == null) {
             return;
         }
-        invoke("save_font", {
-            oldName: fontname,
-            newName: next_font_name,
-        }).catch(async function (e) {
+        try {
+            await invoke("save_font", {
+                oldName: fontname,
+                newName: next_font_name,
+            });
+        } catch (e) {
             error_msg = format_error_message(e);
             open_alert_dialog("Error", error_msg);
-        });
+            return;
+        }
         await get_font_names(null);
         fontname = next_font_name;
+        await get_font(null);
+    }
+
+    async function save_font_with_tool_set_name() {
+        const source_font_name = String(fontname ?? "").trim();
+        const target_font_name = String(tool_set_name ?? "").trim();
+        if (source_font_name == "" || target_font_name == "") {
+            return;
+        }
+        if (source_font_name == target_font_name) {
+            return;
+        }
+        try {
+            await invoke("save_font", {
+                oldName: source_font_name,
+                newName: target_font_name,
+            });
+            await get_font_names(null);
+            fontname = target_font_name;
+            await get_font(null);
+        } catch (e) {
+            error_msg = format_error_message(e);
+            open_alert_dialog("Error", error_msg);
+        }
+    }
+
+    async function switch_font_to_tool_set_if_present() {
+        const matching_font_name = String(tool_set_name ?? "").trim();
+        if (matching_font_name == "" || matching_font_name == fontname) {
+            return;
+        }
+        await get_font_names(null);
+        if (!fontnames.includes(matching_font_name)) {
+            return;
+        }
+        fontname = matching_font_name;
+        await get_font(null);
+    }
+
+    async function finalize_compiled_font_name() {
+        await get_font_names(null);
+        if (!fontnames.includes(DEFAULT_FONT_NAME)) {
+            return fontname;
+        }
+        const next_font_name = String(tool_set_name ?? "").trim();
+        if (
+            next_font_name == "" ||
+            next_font_name == DEFAULT_FONT_NAME ||
+            fontnames.includes(next_font_name)
+        ) {
+            return DEFAULT_FONT_NAME;
+        }
+        try {
+            await invoke("save_font", {
+                oldName: DEFAULT_FONT_NAME,
+                newName: next_font_name,
+            });
+            await get_font_names(null);
+            if (fontnames.includes(next_font_name)) {
+                return next_font_name;
+            }
+        } catch (e) {
+            console.warn("save generated font with toolset name failed", e);
+        }
+        return DEFAULT_FONT_NAME;
     }
 
     async function get_content_names(event) {
@@ -1516,7 +1795,9 @@
                     <button class="ui-button-secondary" onclick={save_content_same_name} title="Save content" aria-label="Save content">
                         <Save class="h-4 w-4" />
                     </button>
-                    <button class="ui-button-ghost" onclick={save_content_as} title="Save content as" aria-label="Save content as">Save As</button>
+                    <button class="ui-button-ghost" onclick={save_content_as} title="Save content as" aria-label="Save content as">
+                        <CopyPlus class="h-4 w-4" />
+                    </button>
                 </div>
             </div>
 
@@ -1547,7 +1828,12 @@
                     <button class="ui-button-secondary" onclick={delete_font} title="Delete font" aria-label="Delete font">
                         <Trash2 class="h-4 w-4" />
                     </button>
-                    <button class="ui-button-ghost" onclick={save_font} title="Save font as" aria-label="Save font as">Save As</button>
+                    <button class="ui-button-secondary" onclick={save_font_with_tool_set_name} title="Save font as selected toolset name" aria-label="Save font as selected toolset name">
+                        <BookmarkPlus class="h-4 w-4" />
+                    </button>
+                    <button class="ui-button-ghost" onclick={save_font} title="Save font as" aria-label="Save font as">
+                        <CopyPlus class="h-4 w-4" />
+                    </button>
                 </div>
             </div>
 
@@ -1565,20 +1851,8 @@
                     <button class="ui-button-secondary" onclick={delete_tool_set} title="Delete tool set" aria-label="Delete tool set">
                         <Trash2 class="h-4 w-4" />
                     </button>
-                    <button class="ui-button-ghost" onclick={save_tool_set_as} title="Save tool set as" aria-label="Save tool set as">Save As</button>
-                </div>
-            </div>
-
-            <div class="space-y-1">
-                <div class="ui-label">Glyph Set</div>
-                <div class="flex items-center gap-2">
-                    <select class="ui-select min-w-[10rem]" bind:value={glyph_set} onchange={change_glyph_set}>
-                        {#each glyph_set_names as item}
-                            <option value={item}>{item}</option>
-                        {/each}
-                    </select>
-                    <button class="ui-button-secondary" onclick={delete_glyph_set} title="Delete glyph set" aria-label="Delete glyph set">
-                        <Trash2 class="h-4 w-4" />
+                    <button class="ui-button-ghost" onclick={save_tool_set_as} title="Save tool set as" aria-label="Save tool set as">
+                        <CopyPlus class="h-4 w-4" />
                     </button>
                 </div>
             </div>
@@ -1659,6 +1933,7 @@
                     bind:this={config_editor_ref}
                     bind:config_name
                     {theme_mode}
+                    on_config_error={handle_config_editor_error}
                 ></ConfigEditor>
             </div>
 
@@ -1747,6 +2022,8 @@
         {get_evolution_config_data}
         {save_evolution_config_same_name}
         {save_evolution_config_as}
+        {rename_evolution_config}
+        {delete_evolution_config}
         {evolve_shell}
         {evolve_from_rendering}
         {render_again_from_rendering}

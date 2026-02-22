@@ -75,6 +75,19 @@ impl XorShift64 {
         }
         (self.next_u64() as usize) % upper_bound
     }
+
+    fn next_unit_f64(&mut self) -> f64 {
+        // Keep values strictly inside (0, 1) so Box-Muller stays stable.
+        ((self.next_u64() as f64) + 1.0) / ((u64::MAX as f64) + 2.0)
+    }
+
+    fn next_standard_normal(&mut self) -> f64 {
+        let u1 = self.next_unit_f64();
+        let u2 = self.next_unit_f64();
+        let r = (-2.0_f64 * u1.ln()).sqrt();
+        let theta = std::f64::consts::TAU * u2;
+        r * theta.cos()
+    }
 }
 
 impl EvolutionEngine {
@@ -238,11 +251,23 @@ impl EvolutionEngine {
                             msg: format!("config.{}.mutation_string.options cannot be empty", key),
                         }));
                     }
-                    let idx = self.rng.next_usize(mutation_string.options.len());
+                    let center_idx = self.get_config_string_center_index(
+                        config,
+                        &key,
+                        &mutation_string.options,
+                    )?;
+                    let idx =
+                        self.sample_centered_index(center_idx, mutation_string.options.len() - 1);
                     self.set_config_string(config, &key, mutation_string.options[idx].clone())?;
                 }
                 ConfigMutationRule::Float { mutation_number } => {
-                    let value = self.sample_number(mutation_number)?;
+                    let center = self.get_config_float_center(config, &key, mutation_number)?;
+                    let mut value = self.sample_number(mutation_number, center)?;
+                    if value < mutation_number.min {
+                        value = mutation_number.min;
+                    } else if value > mutation_number.max {
+                        value = mutation_number.max;
+                    }
                     self.set_config_float(config, &key, value)?;
                 }
             }
@@ -276,6 +301,73 @@ impl EvolutionEngine {
         Ok(())
     }
 
+    fn get_config_string_center_index(
+        &self,
+        config: &Config,
+        key: &str,
+        options: &[String],
+    ) -> Result<usize, Error> {
+        let current = match key {
+            "source" => config.source.clone().unwrap_or_default(),
+            "cho_type" => config.cho_type.clone(),
+            "jung_type" => config.jung_type.clone(),
+            "jong_type" => config.jong_type.clone(),
+            _ => {
+                return Err(Error::Config(ConfigError {
+                    msg: format!(
+                        "Unsupported string config key '{}' in evolution config",
+                        key
+                    ),
+                }));
+            }
+        };
+        Ok(options.iter().position(|opt| opt == &current).unwrap_or(0))
+    }
+
+    fn get_config_float_center(
+        &self,
+        config: &Config,
+        key: &str,
+        mutation_number: &MutationNumber,
+    ) -> Result<f32, Error> {
+        let value = match key {
+            "cho_h_ratio" => config.cho_h_ratio.unwrap_or(0.0),
+            "jung_w_ratio" => config.jung_w_ratio.unwrap_or(1.0),
+            "jong_w_ratio" => config.jong_w_ratio.unwrap_or(1.0),
+            "jung_h_ratio" => config.jung_h_ratio.unwrap_or(1.0),
+            "jong_h_ratio" => config.jong_h_ratio.unwrap_or(1.0),
+            "char_gap" => config.char_gap.unwrap_or(0) as f32,
+            "cho_cho_gap" => config.cho_cho_gap.unwrap_or(0) as f32,
+            "jung_jung_gap" => config.jung_jung_gap.unwrap_or(0) as f32,
+            "jong_jong_gap" => config.jong_jong_gap.unwrap_or(0) as f32,
+            "cho_jung_gap" => config.cho_jung_gap.unwrap_or(0) as f32,
+            "jung_jong_gap" => config.jung_jong_gap.unwrap_or(0) as f32,
+            "x_sw" => config.x_sw.unwrap_or(0.2),
+            "y_sw" => config.y_sw.unwrap_or(0.2),
+            "text_size" => config.text_size.unwrap_or(16) as f32,
+            "underdot_y" => config.underdot_y.unwrap_or(-300) as f32,
+            "underdot_r_ratio" => config.underdot_r_ratio.unwrap_or(0.5),
+            "upperdot_y" => config.upperdot_y.unwrap_or(1800) as f32,
+            "upperdot_r_ratio" => config.upperdot_r_ratio.unwrap_or(0.5),
+            "glyph_width" => config.glyph_width.unwrap_or(800) as f32,
+            "cap_height" => config.cap_height.unwrap_or(1800) as f32,
+            "x_height" => config.x_height.unwrap_or(1500) as f32,
+            "baseline" => config.baseline.unwrap_or(0) as f32,
+            "min_gap" => config.min_gap.unwrap_or(200) as f32,
+            "space_width" => config
+                .space_width
+                .map(|v| v as f32)
+                .unwrap_or(mutation_number.min),
+            "space_width_ratio" => config.space_width_ratio.unwrap_or(2.0),
+            _ => {
+                return Err(Error::Config(ConfigError {
+                    msg: format!("Unsupported float config key '{}' in evolution config", key),
+                }));
+            }
+        };
+        Ok(value)
+    }
+
     fn set_config_float(&self, config: &mut Config, key: &str, value: f32) -> Result<(), Error> {
         match key {
             "cho_h_ratio" => config.cho_h_ratio = Some(value),
@@ -284,9 +376,11 @@ impl EvolutionEngine {
             "jung_h_ratio" => config.jung_h_ratio = Some(value),
             "jong_h_ratio" => config.jong_h_ratio = Some(value),
             "char_gap" => config.char_gap = Some(Self::f32_to_u16(key, value)?),
-            "cho_gap" => config.cho_gap = Some(Self::f32_to_u16(key, value)?),
-            "jung_gap" => config.jung_gap = Some(Self::f32_to_u16(key, value)?),
-            "jong_gap" => config.jong_gap = Some(Self::f32_to_u16(key, value)?),
+            "cho_cho_gap" => config.cho_cho_gap = Some(Self::f32_to_u16(key, value)?),
+            "jung_jung_gap" => config.jung_jung_gap = Some(Self::f32_to_u16(key, value)?),
+            "jong_jong_gap" => config.jong_jong_gap = Some(Self::f32_to_u16(key, value)?),
+            "cho_jung_gap" => config.cho_jung_gap = Some(Self::f32_to_u16(key, value)?),
+            "jung_jong_gap" => config.jung_jong_gap = Some(Self::f32_to_u16(key, value)?),
             "x_sw" => config.x_sw = Some(value),
             "y_sw" => config.y_sw = Some(value),
             "text_size" => config.text_size = Some(Self::f32_to_u16(key, value)?),
@@ -375,9 +469,10 @@ impl EvolutionEngine {
             if !self.passes_kerning_filter(rule, prev_kind, next_kind, pair)? {
                 continue;
             }
-            let delta = self.sample_number(&rule.mutation_number)?;
             if let Some(v) = kerning_data.get_mut(&pair) {
-                *v += delta;
+                let center = *v;
+                let sampled = self.sample_number(&rule.mutation_number, center)?;
+                *v = sampled;
             }
         }
         Ok(())
@@ -417,21 +512,61 @@ impl EvolutionEngine {
         Ok(true)
     }
 
-    fn sample_number(&mut self, m: &MutationNumber) -> Result<f32, Error> {
+    fn sample_centered_value(&mut self, center: f32, min: f32, max: f32) -> f32 {
+        let sigma = (max - min).abs() / 6.0;
+        if !sigma.is_finite() || sigma == 0.0 {
+            return center;
+        }
+        let z = self.rng.next_standard_normal() as f32;
+        let mut new_value = center + z * sigma;
+        if new_value > max {
+            new_value = max * 2.0 - new_value;
+        }
+        if new_value < min {
+            new_value = min * 2.0 - new_value;
+        }
+        new_value
+    }
+
+    fn sample_centered_index(&mut self, center: usize, max_index: usize) -> usize {
+        if max_index == 0 {
+            return 0;
+        }
+        let sampled = self.sample_centered_value(center as f32, 0.0, max_index as f32);
+        let mut idx = sampled.round();
+        if !idx.is_finite() {
+            idx = center as f32;
+        }
+        if idx < 0.0 {
+            idx = 0.0;
+        }
+        if idx > max_index as f32 {
+            idx = max_index as f32;
+        }
+        idx as usize
+    }
+
+    fn sample_number(&mut self, m: &MutationNumber, center: f32) -> Result<f32, Error> {
         if m.step <= 0.0
             || m.min > m.max
             || !m.step.is_finite()
             || !m.min.is_finite()
             || !m.max.is_finite()
+            || !center.is_finite()
         {
             return Err(Error::Config(ConfigError {
                 msg: "Invalid numeric mutation range in evolution config".to_string(),
             }));
         }
-        let steps = ((m.max - m.min) / m.step).floor();
-        let steps = if steps < 0.0 { 0 } else { steps as usize };
-        let idx = self.rng.next_usize(steps + 1);
-        let mut value = m.min + (idx as f32) * m.step;
+        let sampled = self.sample_centered_value(center, m.min, m.max);
+        let snapped_steps = ((sampled - m.min) / m.step).round();
+        let mut value = m.min + snapped_steps * m.step;
+        if !value.is_finite() {
+            value = center;
+        }
+        if value < m.min {
+            value = m.min;
+        }
         if value > m.max {
             value = m.max;
         }
@@ -595,14 +730,20 @@ fn build_args_from_config(
     if config.char_gap.is_none() {
         config.char_gap = Some(0);
     }
-    if config.cho_gap.is_none() {
-        config.cho_gap = Some(0);
+    if config.cho_cho_gap.is_none() {
+        config.cho_cho_gap = Some(0);
     }
-    if config.jung_gap.is_none() {
-        config.jung_gap = Some(0);
+    if config.jung_jung_gap.is_none() {
+        config.jung_jung_gap = Some(0);
     }
-    if config.jong_gap.is_none() {
-        config.jong_gap = Some(0);
+    if config.jong_jong_gap.is_none() {
+        config.jong_jong_gap = Some(0);
+    }
+    if config.cho_jung_gap.is_none() {
+        config.cho_jung_gap = Some(0);
+    }
+    if config.jung_jong_gap.is_none() {
+        config.jung_jong_gap = Some(0);
     }
     if config.text_size.is_none() {
         config.text_size = Some(16);
@@ -645,8 +786,8 @@ fn build_args_from_config(
     }
 
     let glyph_width = config.glyph_width.unwrap();
-    let x_sw = (config.x_sw.unwrap() * glyph_width as f32) as i16;
-    let y_sw = (config.y_sw.unwrap() * glyph_width as f32) as i16;
+    let x_sw = scale_ratio_to_i16("x_sw", config.x_sw.unwrap(), glyph_width)?;
+    let y_sw = scale_ratio_to_i16("y_sw", config.y_sw.unwrap(), glyph_width)?;
 
     Ok(Args {
         source_filename,
@@ -660,9 +801,11 @@ fn build_args_from_config(
         jung_h_ratio: config.jung_h_ratio.unwrap(),
         jong_h_ratio: config.jong_h_ratio.unwrap(),
         char_gap: config.char_gap.unwrap(),
-        cho_gap: config.cho_gap.unwrap(),
-        jung_gap: config.jung_gap.unwrap(),
-        jong_gap: config.jong_gap.unwrap(),
+        cho_cho_gap: config.cho_cho_gap.unwrap(),
+        jung_jung_gap: config.jung_jung_gap.unwrap(),
+        jong_jong_gap: config.jong_jong_gap.unwrap(),
+        cho_jung_gap: config.cho_jung_gap.unwrap(),
+        jung_jong_gap: config.jung_jong_gap.unwrap(),
         x_sw,
         y_sw,
         sw: x_sw,
@@ -680,6 +823,24 @@ fn build_args_from_config(
         space_width: config.space_width,
         space_width_ratio: config.space_width_ratio.unwrap(),
     })
+}
+
+fn scale_ratio_to_i16(config_key: &str, ratio: f32, glyph_width: i16) -> Result<i16, Error> {
+    if !ratio.is_finite() {
+        return Err(Error::Config(ConfigError {
+            msg: format!("Config key '{}' must be a finite number", config_key),
+        }));
+    }
+    let scaled = ratio * glyph_width as f32;
+    if !scaled.is_finite() || scaled < i16::MIN as f32 || scaled > i16::MAX as f32 {
+        return Err(Error::Config(ConfigError {
+            msg: format!(
+                "Config key '{}' produced out-of-range stroke width {} (glyph_width={})",
+                config_key, scaled, glyph_width
+            ),
+        }));
+    }
+    Ok(scaled as i16)
 }
 
 fn parse_jamo_type_flags(type_value: &str) -> u8 {

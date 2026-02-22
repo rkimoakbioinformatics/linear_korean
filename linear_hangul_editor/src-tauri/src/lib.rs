@@ -26,7 +26,7 @@ use tauri::AppHandle;
 type KerningMap = HashMap<(u16, u16), f32>;
 
 const EVOLUTION_PREVIEW_FONT_PREFIX: &str = "evolution_preview_";
-const EVOLUTION_VARIATION_COUNT: usize = 9;
+const EVOLUTION_VARIATION_COUNT: usize = 8;
 const EVOLUTION_MAX_COLLISION_ATTEMPTS: usize = 512;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -93,56 +93,97 @@ fn compile_internal(
     target_codepoints: Option<&[u16]>,
     check_collision: bool,
 ) -> Result<(), Error> {
-    *CONFIG.write().unwrap() = args.clone();
-    let font_bytes: Vec<u8>;
-    if let Some(source_filename) = &args.source_filename {
-        font_bytes = match std::fs::read(source_filename) {
-            Ok(v) => v,
-            Err(e) => {
+    let compile_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        *CONFIG
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = args.clone();
+        let font_bytes: Vec<u8>;
+        if let Some(source_filename) = &args.source_filename {
+            font_bytes = match std::fs::read(source_filename) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Err(Error::Font(FontError {
+                        msg: format!("Failed to read source font '{}': {:?}", source_filename, e),
+                    }));
+                }
+            };
+        } else {
+            font_bytes = Vec::new();
+        }
+        let (mut font_tables, builder) = get_font_tables_and_builder(&font_bytes, glyph_set)?;
+        make_compatibility_jamos(&mut font_tables)?;
+        if let Some(target_codepoints) = target_codepoints {
+            generate_selected_hangul_composite_glyphs(
+                &mut font_tables,
+                target_codepoints,
+                check_collision,
+            )?;
+        } else {
+            generate_hangul_composite_glyphs(&mut font_tables, check_collision)?;
+        }
+        modify_maxp(&mut font_tables);
+        modify_head_hhea(&mut font_tables)?;
+        let font_data = build_font_data(&font_tables, builder);
+        let p = get_font_ttf_p(&args.target_fontname);
+        let dir = match p.parent() {
+            Some(v) => v,
+            None => {
                 return Err(Error::Font(FontError {
-                    msg: format!("Failed to read source font '{}': {:?}", source_filename, e),
+                    msg: format!("Invalid target font path: {:?}", p),
                 }));
             }
         };
-    } else {
-        font_bytes = Vec::new();
-    }
-    let (mut font_tables, builder) = get_font_tables_and_builder(&font_bytes, glyph_set)?;
-    make_compatibility_jamos(&mut font_tables)?;
-    if let Some(target_codepoints) = target_codepoints {
-        generate_selected_hangul_composite_glyphs(
-            &mut font_tables,
-            target_codepoints,
-            check_collision,
-        )?;
-    } else {
-        generate_hangul_composite_glyphs(&mut font_tables, check_collision)?;
-    }
-    modify_maxp(&mut font_tables);
-    modify_head_hhea(&mut font_tables)?;
-    let font_data = build_font_data(&font_tables, builder);
-    let p = get_font_ttf_p(&args.target_fontname);
-    let dir = match p.parent() {
-        Some(v) => v,
-        None => {
+        if !dir.exists() {
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                return Err(Error::Font(FontError {
+                    msg: format!("Failed to create output directory {:?}: {:?}", dir, e),
+                }));
+            }
+        }
+        if let Err(e) = std::fs::write(&p, font_data) {
             return Err(Error::Font(FontError {
-                msg: format!("Invalid target font path: {:?}", p),
+                msg: format!("Failed to write compiled font {:?}: {:?}", p, e),
             }));
         }
-    };
-    if !dir.exists() {
-        if let Err(e) = std::fs::create_dir_all(&dir) {
-            return Err(Error::Font(FontError {
-                msg: format!("Failed to create output directory {:?}: {:?}", dir, e),
-            }));
-        }
+        Ok(())
+    }));
+    match compile_result {
+        Ok(result) => result,
+        Err(panic_payload) => Err(Error::Font(FontError {
+            msg: format!(
+                "Unexpected panic while generating glyphs: {}",
+                panic_payload_to_message(&panic_payload)
+            ),
+        })),
     }
-    if let Err(e) = std::fs::write(&p, font_data) {
-        return Err(Error::Font(FontError {
-            msg: format!("Failed to write compiled font {:?}: {:?}", p, e),
+}
+
+fn panic_payload_to_message(panic_payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = panic_payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
+}
+
+fn scale_ratio_to_i16(config_key: &str, ratio: f32, glyph_width: i16) -> Result<i16, Error> {
+    if !ratio.is_finite() {
+        return Err(Error::Config(ConfigError {
+            msg: format!("Config key '{}' must be a finite number", config_key),
         }));
     }
-    Ok(())
+    let scaled = ratio * glyph_width as f32;
+    if !scaled.is_finite() || scaled < i16::MIN as f32 || scaled > i16::MAX as f32 {
+        return Err(Error::Config(ConfigError {
+            msg: format!(
+                "Config key '{}' produced out-of-range stroke width {} (glyph_width={})",
+                config_key, scaled, glyph_width
+            ),
+        }));
+    }
+    Ok(scaled as i16)
 }
 
 fn collect_hangul_syllable_codepoints(content: &str) -> Vec<u16> {
@@ -236,11 +277,20 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
         if config.char_gap.is_none() {
             config.char_gap = in_config.char_gap;
         }
-        if config.jung_gap.is_none() {
-            config.jung_gap = in_config.jung_gap;
+        if config.cho_cho_gap.is_none() {
+            config.cho_cho_gap = in_config.cho_cho_gap;
         }
-        if config.jong_gap.is_none() {
-            config.jong_gap = in_config.jong_gap;
+        if config.jung_jung_gap.is_none() {
+            config.jung_jung_gap = in_config.jung_jung_gap;
+        }
+        if config.jong_jong_gap.is_none() {
+            config.jong_jong_gap = in_config.jong_jong_gap;
+        }
+        if config.cho_jung_gap.is_none() {
+            config.cho_jung_gap = in_config.cho_jung_gap;
+        }
+        if config.jung_jong_gap.is_none() {
+            config.jung_jong_gap = in_config.jung_jong_gap;
         }
         if config.x_sw.is_none() {
             config.x_sw = in_config.x_sw;
@@ -318,14 +368,20 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
     if config.char_gap.is_none() {
         config.char_gap = Some(0);
     }
-    if config.cho_gap.is_none() {
-        config.cho_gap = Some(0);
+    if config.cho_cho_gap.is_none() {
+        config.cho_cho_gap = Some(0);
     }
-    if config.jung_gap.is_none() {
-        config.jung_gap = Some(0);
+    if config.jung_jung_gap.is_none() {
+        config.jung_jung_gap = Some(0);
     }
-    if config.jong_gap.is_none() {
-        config.jong_gap = Some(0);
+    if config.jong_jong_gap.is_none() {
+        config.jong_jong_gap = Some(0);
+    }
+    if config.cho_jung_gap.is_none() {
+        config.cho_jung_gap = Some(0);
+    }
+    if config.jung_jong_gap.is_none() {
+        config.jung_jong_gap = Some(0);
     }
     if config.text_size.is_none() {
         config.text_size = Some(16);
@@ -378,9 +434,11 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
     let jung_h_ratio: f32 = config.jung_h_ratio.unwrap();
     let jong_h_ratio: f32 = config.jong_h_ratio.unwrap();
     let char_gap: u16 = config.char_gap.unwrap();
-    let cho_gap: u16 = config.cho_gap.unwrap();
-    let jung_gap: u16 = config.jung_gap.unwrap();
-    let jong_gap: u16 = config.jong_gap.unwrap();
+    let cho_cho_gap: u16 = config.cho_cho_gap.unwrap();
+    let jung_jung_gap: u16 = config.jung_jung_gap.unwrap();
+    let jong_jong_gap: u16 = config.jong_jong_gap.unwrap();
+    let cho_jung_gap: u16 = config.cho_jung_gap.unwrap();
+    let jung_jong_gap: u16 = config.jung_jong_gap.unwrap();
     let text_size: u16 = config.text_size.unwrap();
     let underdot_y: i16 = config.underdot_y.unwrap();
     let underdot_r_ratio: f32 = config.underdot_r_ratio.unwrap();
@@ -391,8 +449,8 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
     let x_height: i16 = config.x_height.unwrap();
     let cap_height: i16 = config.cap_height.unwrap();
     let min_gap: i16 = config.min_gap.unwrap();
-    let x_sw: i16 = (config.x_sw.unwrap() * glyph_width as f32) as i16;
-    let y_sw: i16 = (config.y_sw.unwrap() * glyph_width as f32) as i16;
+    let x_sw = scale_ratio_to_i16("x_sw", config.x_sw.unwrap(), glyph_width)?;
+    let y_sw = scale_ratio_to_i16("y_sw", config.y_sw.unwrap(), glyph_width)?;
     let sw: i16 = x_sw;
     let kerning_data: KerningMap = get_kerning_map(kerning_name)?;
     let space_width: Option<u16> = config.space_width;
@@ -409,9 +467,11 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
         jung_h_ratio,
         jong_h_ratio,
         char_gap,
-        cho_gap,
-        jung_gap,
-        jong_gap,
+        cho_cho_gap,
+        jung_jung_gap,
+        jong_jong_gap,
+        cho_jung_gap,
+        jung_jong_gap,
         x_sw,
         y_sw,
         sw,
@@ -754,6 +814,62 @@ fn save_evolution_config(evolution_data: String, evolution_name: String) -> Resu
     Ok(())
 }
 
+#[tauri::command]
+fn rename_evolution_config(old_name: String, new_name: String) -> Result<(), Error> {
+    let old_name = old_name.trim().to_string();
+    let new_name = new_name.trim().to_string();
+    if old_name.is_empty() || new_name.is_empty() {
+        return Err(Error::Config(ConfigError {
+            msg: "Evolution config names cannot be empty".to_string(),
+        }));
+    }
+    if old_name == new_name {
+        return Ok(());
+    }
+    let old_path = get_evolution_p(&old_name);
+    if !old_path.exists() {
+        return Err(Error::Config(ConfigError {
+            msg: format!("Evolution config '{}' does not exist", old_name),
+        }));
+    }
+    let new_path = get_evolution_p(&new_name);
+    if new_path.exists() {
+        return Err(Error::Config(ConfigError {
+            msg: format!("Evolution config '{}' already exists", new_name),
+        }));
+    }
+    match std::fs::rename(&old_path, &new_path) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(Error::Config(ConfigError {
+            msg: format!(
+                "Failed to rename evolution config '{}' to '{}': {:?}",
+                old_name, new_name, e
+            ),
+        })),
+    }
+}
+
+#[tauri::command]
+fn delete_evolution_config(evolution_name: String) -> Result<(), Error> {
+    let evolution_name = evolution_name.trim().to_string();
+    if evolution_name.is_empty() {
+        return Ok(());
+    }
+    let path = get_evolution_p(&evolution_name);
+    if !path.exists() {
+        return Ok(());
+    }
+    match std::fs::remove_file(&path) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(Error::Config(ConfigError {
+            msg: format!(
+                "Failed to delete evolution config '{}': {:?}",
+                evolution_name, e
+            ),
+        })),
+    }
+}
+
 fn load_evolve_root_seed(config_name: &str, kerning_name: &str) -> Result<EvolveSeedState, Error> {
     let config_str = get_config_str(config_name);
     if config_str.trim().is_empty() {
@@ -972,7 +1088,7 @@ fn evolve(
         &original_font_name,
     )?;
     items.push(EvolvePreviewItem {
-        label: "Original".to_string(),
+        label: "Base Variant".to_string(),
         font_name: original_font_name,
         config_data: serialize_evolve_config_data(&base_seed.config)?,
         kerning_data: serialize_evolve_kerning_data(&base_seed.kerning_data),
@@ -1137,7 +1253,7 @@ fn evolve_replace_variant(
         ) {
             Ok(()) => {
                 let label = if target_index == 0 {
-                    format!("Original · G{}", generation)
+                    format!("Base Variant · G{}", generation)
                 } else {
                     format!("Mutation {} · G{}", target_index, generation)
                 };
@@ -1221,7 +1337,7 @@ fn evolve_render_variant(
 
     let resolved_label = label.unwrap_or_else(|| {
         if target_index == 0 {
-            format!("Original · G{}", generation)
+            format!("Base Variant · G{}", generation)
         } else {
             format!("Mutation {} · G{}", target_index, generation)
         }
@@ -1358,8 +1474,9 @@ fn get_font_names() -> Vec<String> {
         match std::fs::metadata(&p) {
             Ok(metadata) => {
                 if metadata.is_dir() {
-                    let s = p.file_stem().unwrap().to_string_lossy().to_string();
-                    v.push(s);
+                    if let Some(s) = p.file_name().and_then(|v| v.to_str()) {
+                        v.push(s.to_string());
+                    }
                 }
             }
             Err(_) => {}
@@ -1579,7 +1696,9 @@ fn run_compile(
         }
     };
     let args = get_args(&mut config, &kerning_name)?;
-    *CONFIG.write().unwrap() = args.clone();
+    *CONFIG
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = args.clone();
     let _ = std::thread::spawn(move || {
         let compile_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // Delete the existing generated font folder.
@@ -1618,13 +1737,7 @@ fn run_compile(
                 let _ = app.emit("error", format!("{:?}", e));
             }
             Err(panic_payload) => {
-                let panic_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                    (*s).to_string()
-                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "unknown panic payload".to_string()
-                };
+                let panic_msg = panic_payload_to_message(&panic_payload);
                 let _ = app.emit(
                     "error",
                     format!("Unexpected panic while compiling glyphs: {}", panic_msg),
@@ -1659,7 +1772,9 @@ fn run_compile_content(
         }
     };
     let args = get_args(&mut config, &kerning_name)?;
-    *CONFIG.write().unwrap() = args.clone();
+    *CONFIG
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = args.clone();
     let _ = std::thread::spawn(move || {
         let compile_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let font_dir = get_font_dir(COMPILED_FONT_NAME);
@@ -1703,13 +1818,7 @@ fn run_compile_content(
                 let _ = app.emit("error", format!("{:?}", e));
             }
             Err(panic_payload) => {
-                let panic_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                    (*s).to_string()
-                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "unknown panic payload".to_string()
-                };
+                let panic_msg = panic_payload_to_message(&panic_payload);
                 let _ = app.emit(
                     "error",
                     format!("Unexpected panic while compiling glyphs: {}", panic_msg),
@@ -1760,6 +1869,8 @@ pub fn run() {
             get_evolution_config_names,
             get_evolution_config_data,
             save_evolution_config,
+            rename_evolution_config,
+            delete_evolution_config,
             evolve,
             evolve_replace_variant,
             evolve_render_variant,

@@ -1,5 +1,17 @@
 <script>
     // @ts-nocheck
+    import {
+        Copy,
+        CopyPlus,
+        Pencil,
+        RotateCcw,
+        Save,
+        Shapes,
+        Sparkles,
+        Trash2,
+        X,
+    } from "lucide-svelte";
+
     const EVOLUTION_CONFIG_SHAPE = `{
   version: 1,
   kerning: {
@@ -41,9 +53,11 @@
     jung_h_ratio: { type: "float", mutation_number: { min: 0.8, max: 1.2, step: 0.01 } },
     jong_h_ratio: { type: "float", mutation_number: { min: 0.8, max: 1.2, step: 0.01 } },
     char_gap: { type: "float", mutation_number: { min: 0, max: 80, step: 1 } },
-    cho_gap: { type: "float", mutation_number: { min: 0, max: 80, step: 1 } },
-    jung_gap: { type: "float", mutation_number: { min: 0, max: 80, step: 1 } },
-    jong_gap: { type: "float", mutation_number: { min: 0, max: 80, step: 1 } },
+    cho_cho_gap: { type: "float", mutation_number: { min: 0, max: 80, step: 1 } },
+    jung_jung_gap: { type: "float", mutation_number: { min: 0, max: 80, step: 1 } },
+    jong_jong_gap: { type: "float", mutation_number: { min: 0, max: 80, step: 1 } },
+    cho_jung_gap: { type: "float", mutation_number: { min: 0, max: 80, step: 1 } },
+    jung_jong_gap: { type: "float", mutation_number: { min: 0, max: 80, step: 1 } },
     x_sw: { type: "float", mutation_number: { min: 0.8, max: 1.2, step: 0.01 } },
     y_sw: { type: "float", mutation_number: { min: 0.8, max: 1.2, step: 0.01 } },
     text_size: { type: "float", mutation_number: { min: 10, max: 48, step: 1 } },
@@ -87,6 +101,8 @@
         get_evolution_config_data = () => {},
         save_evolution_config_same_name = () => {},
         save_evolution_config_as = () => {},
+        rename_evolution_config = () => {},
+        delete_evolution_config = () => {},
         evolve_shell = () => {},
         evolve_from_rendering = () => {},
         render_again_from_rendering = () => {},
@@ -127,32 +143,94 @@
                     </select>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
-                    <button class="ui-button-secondary" onclick={save_evolution_config_same_name}>Save</button>
-                    <button class="ui-button-ghost" onclick={save_evolution_config_as}>Save As</button>
+                    <button
+                        class="ui-button-secondary"
+                        onclick={save_evolution_config_same_name}
+                        title="Save evolution config"
+                        aria-label="Save evolution config"
+                    >
+                        <Save class="h-4 w-4" />
+                    </button>
+                    <button
+                        class="ui-button-ghost"
+                        onclick={rename_evolution_config}
+                        title="Rename evolution config"
+                        aria-label="Rename evolution config"
+                    >
+                        <Pencil class="h-4 w-4" />
+                    </button>
+                    <button
+                        class="ui-button-ghost"
+                        onclick={save_evolution_config_as}
+                        title="Save evolution config as"
+                        aria-label="Save evolution config as"
+                    >
+                        <CopyPlus class="h-4 w-4" />
+                    </button>
+                    <button
+                        class="ui-button-ghost"
+                        onclick={delete_evolution_config}
+                        title="Delete evolution config"
+                        aria-label="Delete evolution config"
+                    >
+                        <Trash2 class="h-4 w-4" />
+                    </button>
                     <label class="ui-label flex items-center gap-1 rounded-md border border-[hsl(var(--border))] px-2 py-1">
                         <input type="checkbox" bind:checked={collision_check_enabled} />
                         Collision
                     </label>
-                    <button class="ui-button-ghost" onclick={() => (evolution_shape_dialog_open = true)}>
-                        Shape
+                    <button
+                        class="ui-button-ghost"
+                        onclick={() => (evolution_shape_dialog_open = true)}
+                        title="Show evolution config shape"
+                        aria-label="Show evolution config shape"
+                    >
+                        <Shapes class="h-4 w-4" />
                     </button>
-                    <button class="ui-button-secondary" onclick={reset_evolution_renderings} disabled={evolve_disabled}>
-                        Reset
+                    <button
+                        class="ui-button-secondary"
+                        onclick={reset_evolution_renderings}
+                        disabled={evolve_disabled}
+                        title="Reset evolution renderings"
+                        aria-label="Reset evolution renderings"
+                    >
+                        <RotateCcw class="h-4 w-4" />
                     </button>
                     <button
                         class="ui-button-secondary"
                         onclick={copy_selected_variant_to_main_editors}
                         disabled={evolve_disabled}
+                        title="Copy selected variant to main editors"
+                        aria-label="Copy selected variant to main editors"
                     >
-                        Copy To Main
+                        <Copy class="h-4 w-4" />
                     </button>
-                    <button class="ui-button-ghost" onclick={save_selected_variant_as} disabled={evolve_disabled}>
-                        Save as
+                    <button
+                        class="ui-button-ghost"
+                        onclick={save_selected_variant_as}
+                        disabled={evolve_disabled}
+                        title="Save selected variant as"
+                        aria-label="Save selected variant as"
+                    >
+                        <CopyPlus class="h-4 w-4" />
                     </button>
-                    <button class="ui-button-primary" onclick={() => evolve_shell()} disabled={evolve_disabled}>
-                        Evolve
+                    <button
+                        class="ui-button-primary"
+                        onclick={() => evolve_shell()}
+                        disabled={evolve_disabled}
+                        title="Evolve"
+                        aria-label="Evolve"
+                    >
+                        <Sparkles class="h-4 w-4" />
                     </button>
-                    <button class="ui-button-ghost" onclick={close_evolution_dialog}>Close</button>
+                    <button
+                        class="ui-button-ghost"
+                        onclick={close_evolution_dialog}
+                        title="Close evolution dialog"
+                        aria-label="Close evolution dialog"
+                    >
+                        <X class="h-4 w-4" />
+                    </button>
                 </div>
             </div>
 
@@ -188,7 +266,7 @@
 
                 <div class="ui-card flex min-h-0 flex-col p-3">
                     <div class="mb-2 flex items-center justify-between">
-                        <div class="ui-label">Renderings (1 Original + 9 Mutations)</div>
+                        <div class="ui-label">Renderings</div>
                         <div class="text-xs text-[hsl(var(--muted-foreground))]">Generation {evolution_generation}</div>
                     </div>
                     <div class="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-auto pr-1 md:grid-cols-2">
@@ -196,7 +274,9 @@
                             <div class="flex min-h-0 flex-col gap-1">
                                 <div class="group relative">
                                     <button
-                                        class={`ui-button-secondary h-8 w-full justify-start px-2 pr-44 text-xs ${
+                                        class={`ui-button-secondary h-8 w-full justify-start px-2 ${
+                                            rendering?.is_system_font ? "pr-2" : "pr-44"
+                                        } text-xs ${
                                             evolution_selected_rendering == idx
                                                 ? "border-[hsl(var(--primary))] bg-[hsl(var(--accent))]"
                                                 : ""
@@ -211,41 +291,46 @@
                                         {#if evolution_base_rendering == idx}
                                             <span class="ml-2 text-[10px] text-[hsl(var(--primary))]">Base</span>
                                         {/if}
+                                        {#if rendering?.is_system_font}
+                                            <span class="ml-2 text-[10px] text-[hsl(var(--muted-foreground))]">System</span>
+                                        {/if}
                                     </button>
-                                    <div
-                                        class="absolute right-1 top-1/2 flex -translate-y-1/2 gap-1 opacity-0 transition-opacity group-hover:opacity-100"
-                                    >
-                                        <button
-                                            class="ui-button-ghost h-6 px-2 text-[10px]"
-                                            disabled={evolve_disabled}
-                                            onclick={(event) => {
-                                                event.stopPropagation();
-                                                render_again_from_rendering(idx);
-                                            }}
+                                    {#if !rendering?.is_system_font}
+                                        <div
+                                            class="absolute right-1 top-1/2 flex -translate-y-1/2 gap-1 opacity-0 transition-opacity group-hover:opacity-100"
                                         >
-                                            Render
-                                        </button>
-                                        <button
-                                            class="ui-button-ghost h-6 px-2 text-[10px]"
-                                            disabled={evolve_disabled}
-                                            onclick={(event) => {
-                                                event.stopPropagation();
-                                                evolve_from_rendering(idx);
-                                            }}
-                                        >
-                                            Evolve
-                                        </button>
-                                        <button
-                                            class="ui-button-ghost h-6 px-2 text-[10px]"
-                                            disabled={evolve_disabled}
-                                            onclick={(event) => {
-                                                event.stopPropagation();
-                                                replace_rendering_from_base(idx);
-                                            }}
-                                        >
-                                            X
-                                        </button>
-                                    </div>
+                                            <button
+                                                class="ui-button-ghost h-6 px-2 text-[10px]"
+                                                disabled={evolve_disabled}
+                                                onclick={(event) => {
+                                                    event.stopPropagation();
+                                                    render_again_from_rendering(idx);
+                                                }}
+                                            >
+                                                Render
+                                            </button>
+                                            <button
+                                                class="ui-button-ghost h-6 px-2 text-[10px]"
+                                                disabled={evolve_disabled}
+                                                onclick={(event) => {
+                                                    event.stopPropagation();
+                                                    evolve_from_rendering(idx);
+                                                }}
+                                            >
+                                                Evolve
+                                            </button>
+                                            <button
+                                                class="ui-button-ghost h-6 px-2 text-[10px]"
+                                                disabled={evolve_disabled}
+                                                onclick={(event) => {
+                                                    event.stopPropagation();
+                                                    replace_rendering_from_base(idx);
+                                                }}
+                                            >
+                                                X
+                                            </button>
+                                        </div>
+                                    {/if}
                                 </div>
                                 {#key `${idx}-${rendering.render_version ?? 0}`}
                                     <textarea

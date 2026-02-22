@@ -46,7 +46,9 @@ pub fn collect_glyphs(
     font_tables: &mut FontTables,
     created_glyphs: HashMap<u16, Glyph>,
 ) -> Result<(), Error> {
-    let args = &*CONFIG.read().unwrap();
+    let args = &*CONFIG
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let glyph_width = args.glyph_width;
     let space_glyph_id = font_tables.codepoint_to_glyph_id.get(&32).copied();
     let loca_format = font_tables.head.index_to_loc_format;
@@ -62,15 +64,6 @@ pub fn collect_glyphs(
         if space_glyph_id == Some(glyph_id as u16) {
             if let Some(space_glyph) = created_glyphs.get(&32) {
                 let advance = resolve_space_advance(args);
-                eprintln!(
-                    "[font][space] target_font='{}' branch=space_glyph_id glyph_id={} advance={} explicit_space_width={:?} space_width_ratio={} glyph_width={}",
-                    args.target_fontname,
-                    glyph_id,
-                    advance,
-                    args.space_width,
-                    args.space_width_ratio,
-                    args.glyph_width
-                );
                 font_tables.hmtx.h_metrics[glyph_id].advance = advance;
                 font_tables.glyphs.push(space_glyph.clone());
                 continue;
@@ -87,15 +80,6 @@ pub fn collect_glyphs(
             let g = created_glyphs.get(&codepoint).unwrap();
             if codepoint == 32 {
                 let advance = resolve_space_advance(args);
-                eprintln!(
-                    "[font][space] target_font='{}' branch=codepoint_lookup glyph_id={} advance={} explicit_space_width={:?} space_width_ratio={} glyph_width={}",
-                    args.target_fontname,
-                    glyph_id,
-                    advance,
-                    args.space_width,
-                    args.space_width_ratio,
-                    args.glyph_width
-                );
                 font_tables.hmtx.h_metrics[glyph_id].advance = advance;
                 font_tables.glyphs.push(g.clone());
                 continue;
@@ -182,7 +166,9 @@ pub fn generate_selected_hangul_composite_glyphs(
     check_collision: bool,
 ) -> Result<(), Error> {
     let mut collision_checker = if check_collision {
-        let args = &*CONFIG.read().unwrap();
+        let args = &*CONFIG
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         Some(CollisionChecker::new(args.glyph_width, None)?)
     } else {
         None
@@ -642,7 +628,9 @@ pub fn get_font_tables_and_builder<'a>(
     font_bytes: &'a [u8],
     glyph_set: &str,
 ) -> Result<(FontTables, FontBuilder<'a>), Error> {
-    let args = &*CONFIG.read().unwrap();
+    let args = &*CONFIG
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut builder = FontBuilder::default();
     let mut font_tables = get_initial_font_tables();
     let created_glyphs = crate::glyph::create_glyphs(glyph_set)?;
@@ -716,15 +704,6 @@ pub fn get_font_tables_and_builder<'a>(
             let glyph = created_glyphs.get(codepoint).unwrap();
             if *codepoint == 32 {
                 let advance = resolve_space_advance(args);
-                eprintln!(
-                    "[font][space] target_font='{}' branch=no_source_hmtx glyph_id={} advance={} explicit_space_width={:?} space_width_ratio={} glyph_width={}",
-                    args.target_fontname,
-                    glyph_id,
-                    advance,
-                    args.space_width,
-                    args.space_width_ratio,
-                    args.glyph_width
-                );
                 font_tables.hmtx.h_metrics.push(LongMetric {
                     advance,
                     side_bearing: 0,
