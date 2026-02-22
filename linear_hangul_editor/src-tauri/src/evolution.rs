@@ -1,6 +1,7 @@
 use crate::consts::{CHO_TO_JONG_MAP, KERN_JAMO_MAP};
 use crate::error::{ConfigError, Error, FontError};
 use crate::file::{delete_font_dir, get_evolution_dir, get_evolution_str, get_font_dir};
+use crate::glyph::LuaVariableCatalog;
 use crate::structs::{
     Args, Config, ConfigMutationRule, EvolutionConfigFile, KerningMutationAxes,
     KerningMutationRule, MutationNumber,
@@ -143,11 +144,15 @@ impl EvolutionEngine {
         &mut self,
         base_config: &Config,
         base_kerning_data: &KerningMap,
+        lua_variable_catalog: Option<&LuaVariableCatalog>,
     ) -> Result<EvolutionCandidate, Error> {
         let mut config = base_config.clone();
         let mut kerning_data = base_kerning_data.clone();
         self.apply_config_mutation(&mut config)?;
         self.apply_kerning_mutation(&mut kerning_data)?;
+        if let Some(catalog) = lua_variable_catalog {
+            self.apply_lua_variable_mutation(&mut config, catalog)?;
+        }
         self.generation += 1;
         Ok(EvolutionCandidate {
             generation: self.generation,
@@ -168,6 +173,7 @@ impl EvolutionEngine {
             candidate.config.clone(),
             candidate.kerning_data.clone(),
             target_fontname.to_string(),
+            glyph_set,
         )?;
         let font_dir = get_font_dir(&args.target_fontname);
         if font_dir.exists() {
@@ -478,6 +484,49 @@ impl EvolutionEngine {
         Ok(())
     }
 
+    fn apply_lua_variable_mutation(
+        &mut self,
+        config: &mut Config,
+        catalog: &LuaVariableCatalog,
+    ) -> Result<(), Error> {
+        let filter = match &self.evolution_config.lua_variables {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+        let include: HashSet<String> = filter
+            .include
+            .iter()
+            .map(|v| v.trim().to_ascii_lowercase())
+            .filter(|v| !v.is_empty())
+            .collect();
+        let exclude: HashSet<String> = filter
+            .exclude
+            .iter()
+            .map(|v| v.trim().to_ascii_lowercase())
+            .filter(|v| !v.is_empty())
+            .collect();
+        for (name, definition) in catalog.by_name.iter() {
+            let key = name.to_ascii_lowercase();
+            if !include.is_empty() && !include.contains(&key) {
+                continue;
+            }
+            if exclude.contains(&key) {
+                continue;
+            }
+            let mutation_number = &definition.mutation_number;
+            let center_default = definition
+                .initial_value
+                .unwrap_or((mutation_number.min + mutation_number.max) / 2.0);
+            let center = match config.lua_variables.get(name).copied() {
+                Some(v) if v.is_finite() => v.clamp(mutation_number.min, mutation_number.max),
+                _ => center_default.clamp(mutation_number.min, mutation_number.max),
+            };
+            let sampled = self.sample_number(mutation_number, center)?;
+            config.lua_variables.insert(name.clone(), sampled);
+        }
+        Ok(())
+    }
+
     fn passes_kerning_filter(
         &self,
         rule: &KerningMutationRule,
@@ -692,6 +741,7 @@ fn build_args_from_config(
     mut config: Config,
     kerning_data: KerningMap,
     target_fontname: String,
+    glyph_set: &str,
 ) -> Result<Args, Error> {
     let source_filename: Option<String> = match &config.source {
         Some(v) => {
@@ -785,6 +835,9 @@ fn build_args_from_config(
         config.space_width_ratio = Some(2.0);
     }
 
+    let resolved_lua_variables =
+        crate::glyph::resolve_lua_variables_for_config(&mut config, glyph_set)?;
+
     let glyph_width = config.glyph_width.unwrap();
     let x_sw = scale_ratio_to_i16("x_sw", config.x_sw.unwrap(), glyph_width)?;
     let y_sw = scale_ratio_to_i16("y_sw", config.y_sw.unwrap(), glyph_width)?;
@@ -822,6 +875,7 @@ fn build_args_from_config(
         kerning_data,
         space_width: config.space_width,
         space_width_ratio: config.space_width_ratio.unwrap(),
+        lua_script_variables: resolved_lua_variables.script_values,
     })
 }
 

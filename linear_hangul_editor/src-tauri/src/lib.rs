@@ -243,7 +243,12 @@ pub fn make_woff2(args: &Args) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> {
+pub fn get_args(
+    config: &mut Config,
+    kerning_name: &str,
+    glyph_set: &str,
+) -> Result<(Args, bool), Error> {
+    let mut lua_variables_changed_from_defaults = false;
     let config_str = get_config_str(DEFAULT_NAME);
     if !config_str.is_empty() {
         let in_config: Config = match json5::from_str(&config_str) {
@@ -330,6 +335,13 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
         }
         if config.space_width.is_none() {
             config.space_width = in_config.space_width;
+        }
+        for (name, value) in in_config.lua_variables.iter() {
+            let entry = config.lua_variables.entry(name.clone());
+            if let std::collections::btree_map::Entry::Vacant(v) = entry {
+                v.insert(*value);
+                lua_variables_changed_from_defaults = true;
+            }
         }
     }
     let source_filename: Option<String> = match &config.source {
@@ -455,40 +467,45 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
     let kerning_data: KerningMap = get_kerning_map(kerning_name)?;
     let space_width: Option<u16> = config.space_width;
     let space_width_ratio: f32 = config.space_width_ratio.unwrap();
-    Ok(Args {
-        source_filename,
-        target_fontname,
-        cho_type,
-        jung_type,
-        jong_type,
-        jung_w_ratio,
-        jong_w_ratio,
-        cho_h_ratio,
-        jung_h_ratio,
-        jong_h_ratio,
-        char_gap,
-        cho_cho_gap,
-        jung_jung_gap,
-        jong_jong_gap,
-        cho_jung_gap,
-        jung_jong_gap,
-        x_sw,
-        y_sw,
-        sw,
-        text_size,
-        underdot_y,
-        underdot_r_ratio,
-        upperdot_y,
-        upperdot_r_ratio,
-        glyph_width,
-        baseline,
-        x_height,
-        cap_height,
-        min_gap,
-        kerning_data,
-        space_width,
-        space_width_ratio,
-    })
+    let resolved_lua_variables = crate::glyph::resolve_lua_variables_for_config(config, glyph_set)?;
+    Ok((
+        Args {
+            source_filename,
+            target_fontname,
+            cho_type,
+            jung_type,
+            jong_type,
+            jung_w_ratio,
+            jong_w_ratio,
+            cho_h_ratio,
+            jung_h_ratio,
+            jong_h_ratio,
+            char_gap,
+            cho_cho_gap,
+            jung_jung_gap,
+            jong_jong_gap,
+            cho_jung_gap,
+            jung_jong_gap,
+            x_sw,
+            y_sw,
+            sw,
+            text_size,
+            underdot_y,
+            underdot_r_ratio,
+            upperdot_y,
+            upperdot_r_ratio,
+            glyph_width,
+            baseline,
+            x_height,
+            cap_height,
+            min_gap,
+            kerning_data,
+            space_width,
+            space_width_ratio,
+            lua_script_variables: resolved_lua_variables.script_values,
+        },
+        lua_variables_changed_from_defaults || resolved_lua_variables.changed,
+    ))
 }
 
 fn parse_kerning_map_from_data(data: &str) -> Result<KerningMap, Error> {
@@ -910,6 +927,19 @@ fn serialize_evolve_config_data(config: &Config) -> Result<String, Error> {
     }
 }
 
+fn persist_config(config_name: &str, config: &Config) -> Result<(), Error> {
+    let config_json = match serde_json::to_string_pretty(config) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(Error::Config(ConfigError {
+                msg: format!("Failed to serialize config '{}': {:?}", config_name, e),
+            }));
+        }
+    };
+    _save_config(&config_json, config_name);
+    Ok(())
+}
+
 fn serialize_evolve_kerning_data(kerning_data: &KerningMap) -> String {
     let mut pairs: Vec<(u16, u16)> = kerning_data.keys().copied().collect();
     pairs.sort_unstable();
@@ -1009,6 +1039,10 @@ fn evolve(
         kerning_name
     };
     let reset_to_root = reset_to_root.unwrap_or(false);
+    let using_seed_config_override = seed_config_data
+        .as_ref()
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
 
     let mut resolved_session_id = session_id;
     let existing_session = if let Some(id) = session_id {
@@ -1066,6 +1100,12 @@ fn evolve(
             base_seed.kerning_data = HashMap::default();
         }
     }
+    let resolved_lua_variables =
+        crate::glyph::resolve_lua_variables_for_config(&mut base_seed.config, &glyph_set)?;
+    if resolved_lua_variables.changed && !using_seed_config_override {
+        persist_config(&config_name, &base_seed.config)?;
+    }
+    let lua_variable_catalog = resolved_lua_variables.catalog;
     let next_generation = session.generation + 1;
     let mut engine = EvolutionEngine::load_from_file(&evolution_name, None)?;
 
@@ -1111,7 +1151,11 @@ fn evolve(
             }));
         }
 
-        let candidate = engine.mutate_once(&base_seed.config, &base_seed.kerning_data)?;
+        let candidate = engine.mutate_once(
+            &base_seed.config,
+            &base_seed.kerning_data,
+            Some(&lua_variable_catalog),
+        )?;
         let mutation_index = accepted_candidates.len() + 1;
         let mutation_font_name = evolution_preview_font_name(&evolution_name, mutation_index);
         match engine.generate_font_for_mutation(
@@ -1211,7 +1255,8 @@ fn evolve_replace_variant(
     };
 
     let root_seed = load_evolve_root_seed(&config_name, &kerning_name)?;
-    let base_config = if base_config_data.trim().is_empty() {
+    let using_root_config = base_config_data.trim().is_empty();
+    let base_config = if using_root_config {
         root_seed.config.clone()
     } else {
         parse_evolve_config_data(&base_config_data)?
@@ -1221,10 +1266,16 @@ fn evolve_replace_variant(
     } else {
         parse_kerning_map_from_data(&base_kerning_data)?
     };
-    let base_seed = EvolveSeedState {
+    let mut base_seed = EvolveSeedState {
         config: base_config,
         kerning_data: base_kerning,
     };
+    let resolved_lua_variables =
+        crate::glyph::resolve_lua_variables_for_config(&mut base_seed.config, &glyph_set)?;
+    if resolved_lua_variables.changed && using_root_config {
+        persist_config(&config_name, &base_seed.config)?;
+    }
+    let lua_variable_catalog = resolved_lua_variables.catalog;
 
     let mut engine = EvolutionEngine::load_from_file(&evolution_name, None)?;
     let mut attempts: usize = 0;
@@ -1240,7 +1291,11 @@ fn evolve_replace_variant(
             }));
         }
 
-        let candidate = engine.mutate_once(&base_seed.config, &base_seed.kerning_data)?;
+        let candidate = engine.mutate_once(
+            &base_seed.config,
+            &base_seed.kerning_data,
+            Some(&lua_variable_catalog),
+        )?;
         let font_name = evolution_preview_font_name(&evolution_name, target_index);
         match engine.generate_font_for_mutation(
             &candidate,
@@ -1303,11 +1358,17 @@ fn evolve_render_variant(
     };
 
     let root_seed = load_evolve_root_seed(&config_name, &kerning_name)?;
-    let render_config = if render_config_data.trim().is_empty() {
+    let using_root_config = render_config_data.trim().is_empty();
+    let mut render_config = if using_root_config {
         root_seed.config.clone()
     } else {
         parse_evolve_config_data(&render_config_data)?
     };
+    let resolved_lua_variables =
+        crate::glyph::resolve_lua_variables_for_config(&mut render_config, &glyph_set)?;
+    if resolved_lua_variables.changed && using_root_config {
+        persist_config(&config_name, &render_config)?;
+    }
     let render_kerning = parse_kerning_map_from_data(&render_kerning_data)?;
 
     let engine = EvolutionEngine::load_from_file(&evolution_name, None)?;
@@ -1413,8 +1474,11 @@ fn save_evolution_variant_as(
         save_name.clone(),
     );
 
-    let mut args = get_args(&mut config, &save_name)?;
+    let (mut args, lua_variables_changed) = get_args(&mut config, &save_name, &save_name)?;
     args.target_fontname = save_name.clone();
+    if lua_variables_changed {
+        persist_config(&save_name, &config)?;
+    }
     let font_dir = get_font_dir(&save_name);
     if font_dir.exists() {
         delete_font_dir(&save_name)?;
@@ -1695,7 +1759,10 @@ fn run_compile(
             return Err(Error::Config(ConfigError { msg }));
         }
     };
-    let args = get_args(&mut config, &kerning_name)?;
+    let (args, lua_variables_changed) = get_args(&mut config, &kerning_name, &glyph_set)?;
+    if lua_variables_changed {
+        persist_config(&config_name, &config)?;
+    }
     *CONFIG
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = args.clone();
@@ -1771,7 +1838,10 @@ fn run_compile_content(
             return Err(Error::Config(ConfigError { msg }));
         }
     };
-    let args = get_args(&mut config, &kerning_name)?;
+    let (args, lua_variables_changed) = get_args(&mut config, &kerning_name, &glyph_set)?;
+    if lua_variables_changed {
+        persist_config(&config_name, &config)?;
+    }
     *CONFIG
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = args.clone();

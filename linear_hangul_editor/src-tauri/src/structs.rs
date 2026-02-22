@@ -59,6 +59,7 @@ pub struct Args {
     pub kerning_data: crate::KerningMap,
     pub space_width: Option<u16>,
     pub space_width_ratio: f32,
+    pub lua_script_variables: BTreeMap<String, f32>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -92,6 +93,8 @@ pub struct Config {
     pub min_gap: Option<i16>,
     pub space_width: Option<u16>,
     pub space_width_ratio: Option<f32>,
+    #[serde(default)]
+    pub lua_variables: BTreeMap<String, f32>,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -109,6 +112,17 @@ pub struct EvolutionConfigFile {
     pub kerning: Option<KerningMutationAxes>,
     #[serde(default)]
     pub config: Option<BTreeMap<String, ConfigMutationRule>>,
+    #[serde(default)]
+    pub lua_variables: Option<LuaVariableMutationFilter>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LuaVariableMutationFilter {
+    #[serde(default)]
+    pub include: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -216,6 +230,10 @@ impl EvolutionConfigFile {
                 }
             }
         }
+        if let Some(lua_variables) = &self.lua_variables {
+            Self::validate_lua_variable_names("lua_variables.include", &lua_variables.include)?;
+            Self::validate_lua_variable_names("lua_variables.exclude", &lua_variables.exclude)?;
+        }
         Ok(())
     }
 
@@ -280,6 +298,22 @@ impl EvolutionConfigFile {
                 return Err(format!(
                     "{} contains [{:?}, {:?}] but each pair item must be a single character",
                     path, pair[0], pair[1]
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_lua_variable_names(path: &str, list: &[String]) -> Result<(), String> {
+        for item in list {
+            let name = item.trim();
+            if name.is_empty() {
+                return Err(format!("{} contains an empty variable name", path));
+            }
+            if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return Err(format!(
+                    "{} contains '{}' but variable names must use ASCII letters/digits/_ only",
+                    path, item
                 ));
             }
         }

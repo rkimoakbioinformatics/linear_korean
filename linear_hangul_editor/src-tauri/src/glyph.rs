@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 
 use crate::collision::CollisionChecker;
@@ -30,6 +31,12 @@ fn lua_error(context: &str, err: impl std::fmt::Debug) -> Error {
 }
 
 fn set_lua_i16(lua: &Lua, key: &str, value: i16) -> Result<(), Error> {
+    lua.globals()
+        .set(key, value)
+        .map_err(|e| lua_error(&format!("setting {}", key), e))
+}
+
+fn set_lua_f32(lua: &Lua, key: &str, value: f32) -> Result<(), Error> {
     lua.globals()
         .set(key, value)
         .map_err(|e| lua_error(&format!("setting {}", key), e))
@@ -77,6 +84,307 @@ fn checked_u16_to_i16(value: u16, context: &str) -> Result<i16, Error> {
     i16::try_from(value).map_err(|_| overflow_font_error(context))
 }
 
+#[derive(Debug, Clone)]
+pub struct LuaVariableDefinition {
+    pub mutation_number: MutationNumber,
+    pub initial_value: Option<f32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LuaVariableCatalog {
+    pub by_name: BTreeMap<String, LuaVariableDefinition>,
+    pub symbol_to_name: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedLuaVariables {
+    pub catalog: LuaVariableCatalog,
+    pub script_values: BTreeMap<String, f32>,
+    pub changed: bool,
+}
+
+fn approx_equal_f32(a: f32, b: f32) -> bool {
+    (a - b).abs() <= 1e-6
+}
+
+fn is_var_token_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+fn find_lua_variable_symbols(script: &str) -> BTreeSet<String> {
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    let bytes = script.as_bytes();
+    let mut i: usize = 0;
+    while i + 5 <= bytes.len() {
+        if &bytes[i..i + 5] != b"VAR__" {
+            i += 1;
+            continue;
+        }
+        if i > 0 && is_var_token_char(bytes[i - 1] as char) {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 5;
+        while j < bytes.len() {
+            let c = bytes[j] as char;
+            if !is_var_token_char(c) {
+                break;
+            }
+            j += 1;
+        }
+        if j > i + 5 {
+            out.insert(script[i..j].to_string());
+        }
+        i = j;
+    }
+    out
+}
+
+fn parse_lua_variable_number(symbol: &str, part_name: &str, raw: &str) -> Result<f32, Error> {
+    let normalized = raw.replace('_', ".");
+    let value = match normalized.parse::<f32>() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(Error::Glyph(GlyphError {
+                msg: format!(
+                    "Invalid {} '{}' (normalized '{}') in glyph variable symbol '{}': {:?}",
+                    part_name, raw, normalized, symbol, e
+                ),
+            }));
+        }
+    };
+    if !value.is_finite() {
+        return Err(Error::Glyph(GlyphError {
+            msg: format!(
+                "Non-finite {} '{}' (normalized '{}') in glyph variable symbol '{}'",
+                part_name, raw, normalized, symbol
+            ),
+        }));
+    }
+    Ok(value)
+}
+
+fn parse_lua_variable_symbol(symbol: &str) -> Result<(String, MutationNumber, Option<f32>), Error> {
+    let parts: Vec<&str> = symbol.split("__").collect();
+    if parts.len() != 5 && parts.len() != 6 {
+        return Err(Error::Glyph(GlyphError {
+            msg: format!(
+                "Invalid glyph variable symbol '{}' format. Expected VAR__<NAME>__<MIN>__<MAX>__<STEP>[__<INITIAL>] with decimal point encoded as '_'",
+                symbol
+            ),
+        }));
+    }
+    if parts[0] != "VAR" {
+        return Err(Error::Glyph(GlyphError {
+            msg: format!("Invalid glyph variable symbol '{}' prefix", symbol),
+        }));
+    }
+    let raw_name = parts[1].trim();
+    if raw_name.is_empty() {
+        return Err(Error::Glyph(GlyphError {
+            msg: format!("Glyph variable symbol '{}' has empty NAME", symbol),
+        }));
+    }
+    if !raw_name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(Error::Glyph(GlyphError {
+            msg: format!(
+                "Glyph variable symbol '{}' has NAME '{}', which must use ASCII letters/digits/_ only",
+                symbol, raw_name
+            ),
+        }));
+    }
+
+    let min = parse_lua_variable_number(symbol, "MIN", parts[2])?;
+    let max = parse_lua_variable_number(symbol, "MAX", parts[3])?;
+    let step = parse_lua_variable_number(symbol, "STEP", parts[4])?;
+    if min > max {
+        return Err(Error::Glyph(GlyphError {
+            msg: format!(
+                "Glyph variable symbol '{}' has min {} > max {}",
+                symbol, min, max
+            ),
+        }));
+    }
+    if step <= 0.0 {
+        return Err(Error::Glyph(GlyphError {
+            msg: format!(
+                "Glyph variable symbol '{}' has non-positive step {}",
+                symbol, step
+            ),
+        }));
+    }
+    let initial_value = if parts.len() == 6 {
+        Some(parse_lua_variable_number(symbol, "INITIAL", parts[5])?)
+    } else {
+        None
+    };
+
+    Ok((
+        raw_name.to_ascii_lowercase(),
+        MutationNumber { min, max, step },
+        initial_value,
+    ))
+}
+
+pub fn collect_lua_variable_catalog(glyph_set: &str) -> Result<LuaVariableCatalog, Error> {
+    let mut catalog = LuaVariableCatalog::default();
+    let glyph_dir = get_glyph_set_dir(glyph_set);
+    let read_dir = match glyph_dir.read_dir() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(Error::Glyph(GlyphError {
+                msg: format!(
+                    "Cannot scan glyph set '{}' for Lua variables at {:?}: {:?}",
+                    glyph_set, glyph_dir, e
+                ),
+            }));
+        }
+    };
+
+    let mut lua_files = Vec::new();
+    for entry in read_dir.flatten() {
+        let p = entry.path();
+        let ext = match p.extension().and_then(|v| v.to_str()) {
+            Some(v) => v,
+            None => continue,
+        };
+        if !ext.eq_ignore_ascii_case("lua") {
+            continue;
+        }
+        lua_files.push(p);
+    }
+    lua_files.sort();
+
+    for lua_file in lua_files {
+        let script = match std::fs::read_to_string(&lua_file) {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(Error::Glyph(GlyphError {
+                    msg: format!("Cannot read glyph Lua file {:?}: {:?}", lua_file, e),
+                }));
+            }
+        };
+        for symbol in find_lua_variable_symbols(&script) {
+            let (name, mutation_number, initial_value) = parse_lua_variable_symbol(&symbol)?;
+            if let Some(existing_name) = catalog.symbol_to_name.get(&symbol) {
+                if existing_name != &name {
+                    return Err(Error::Glyph(GlyphError {
+                        msg: format!(
+                            "Glyph variable symbol '{}' maps to conflicting names '{}' and '{}'",
+                            symbol, existing_name, name
+                        ),
+                    }));
+                }
+            } else {
+                catalog.symbol_to_name.insert(symbol.clone(), name.clone());
+            }
+
+            if let Some(existing) = catalog.by_name.get_mut(&name) {
+                let current = &existing.mutation_number;
+                if !approx_equal_f32(current.min, mutation_number.min)
+                    || !approx_equal_f32(current.max, mutation_number.max)
+                    || !approx_equal_f32(current.step, mutation_number.step)
+                {
+                    return Err(Error::Glyph(GlyphError {
+                        msg: format!(
+                            "Glyph variable '{}' has conflicting min/max/step across scripts",
+                            name
+                        ),
+                    }));
+                }
+                if let Some(next_initial) = initial_value {
+                    match existing.initial_value {
+                        Some(prev_initial) if !approx_equal_f32(prev_initial, next_initial) => {
+                            return Err(Error::Glyph(GlyphError {
+                                msg: format!(
+                                    "Glyph variable '{}' has conflicting initial values {} and {}",
+                                    name, prev_initial, next_initial
+                                ),
+                            }));
+                        }
+                        None => {
+                            existing.initial_value = Some(next_initial);
+                        }
+                        _ => {}
+                    }
+                }
+            } else {
+                catalog.by_name.insert(
+                    name,
+                    LuaVariableDefinition {
+                        mutation_number,
+                        initial_value,
+                    },
+                );
+            }
+        }
+    }
+
+    Ok(catalog)
+}
+
+fn default_lua_variable_value(definition: &LuaVariableDefinition) -> f32 {
+    let min = definition.mutation_number.min;
+    let max = definition.mutation_number.max;
+    let center = (min + max) / 2.0;
+    let mut value = definition.initial_value.unwrap_or(center);
+    if !value.is_finite() {
+        value = center;
+    }
+    value.clamp(min, max)
+}
+
+pub fn resolve_lua_variables_for_config(
+    config: &mut Config,
+    glyph_set: &str,
+) -> Result<ResolvedLuaVariables, Error> {
+    let catalog = collect_lua_variable_catalog(glyph_set)?;
+    let mut changed = false;
+    for (name, definition) in catalog.by_name.iter() {
+        let default_value = default_lua_variable_value(definition);
+        let current = config.lua_variables.get(name).copied();
+        let resolved = match current {
+            Some(value) if value.is_finite() => value.clamp(
+                definition.mutation_number.min,
+                definition.mutation_number.max,
+            ),
+            _ => default_value,
+        };
+        if current.is_none()
+            || !current.unwrap_or(resolved).is_finite()
+            || !approx_equal_f32(current.unwrap_or(resolved), resolved)
+        {
+            changed = true;
+            config.lua_variables.insert(name.clone(), resolved);
+        }
+    }
+
+    let mut script_values: BTreeMap<String, f32> = BTreeMap::new();
+    for (symbol, name) in catalog.symbol_to_name.iter() {
+        let value = match config.lua_variables.get(name).copied() {
+            Some(v) => v,
+            None => continue,
+        };
+        script_values.insert(symbol.clone(), value);
+    }
+
+    Ok(ResolvedLuaVariables {
+        catalog,
+        script_values,
+        changed,
+    })
+}
+
+fn apply_lua_script_variables(lua: &Lua, args: &Args) -> Result<(), Error> {
+    for (name, value) in args.lua_script_variables.iter() {
+        set_lua_f32(lua, name, *value)?;
+    }
+    Ok(())
+}
+
 pub fn get_glyph_def(glyph_set: &str, glyph_name: &str) -> Result<String, Error> {
     let mut p = get_glyph_set_dir(glyph_set);
     p.push(format!("{}.lua", glyph_name));
@@ -121,6 +429,7 @@ pub fn get_glyph_curves(
     let args = &*CONFIG
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    apply_lua_script_variables(lua, args)?;
     set_lua_i16(lua, "X_SW", args.x_sw)?;
     set_lua_i16(lua, "Y_SW", args.y_sw)?;
     match sung {
