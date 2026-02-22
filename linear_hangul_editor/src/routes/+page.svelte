@@ -10,6 +10,7 @@
         CopyPlus,
         FolderOpen,
         Hammer,
+        Images,
         Moon,
         RefreshCcw,
         Save,
@@ -21,6 +22,7 @@
     import ConfigEditor from "$lib/config_editor.svelte";
     import KerningEditor from "$lib/kerning_editor.svelte";
     import EvolutionDialog from "$lib/evolution_dialog.svelte";
+    import GalleryDialog from "$lib/gallery_dialog.svelte";
 
     const EVOLUTION_MUTATION_COUNT = 8;
     const EVOLUTION_SYSTEM_RENDERING_INDEX = 1;
@@ -76,6 +78,15 @@
     let evolution_font_families = $state([]);
     let evolution_renderings_from_backend = $state(false);
     let evolution_state_initialized = $state(false);
+    let gallery_dialog_open = $state(false);
+    let gallery_renderings = $state([]);
+    let gallery_selected_rendering = $state(0);
+    let gallery_selected_config_data = $state("");
+    let gallery_selected_kerning_data = $state("");
+    let gallery_font_families = $state([]);
+    let gallery_font_family_by_name = $state({});
+    let gallery_toolset_details_by_font = $state({});
+    let gallery_details_request_id = 0;
 
     let theme_mode = $state("light");
     let should_persist_ui_state = false;
@@ -366,6 +377,253 @@
 
     function get_evolution_preview_text() {
         return (content || "").slice(0, 200);
+    }
+
+    function get_gallery_preview_text() {
+        const preview_text = (content || "").slice(0, 200);
+        return preview_text.length > 0
+            ? preview_text
+            : "No content is loaded. Select a content file to preview gallery renderings.";
+    }
+
+    function clear_gallery_preview_fonts() {
+        if (typeof document == "undefined") {
+            gallery_font_families = [];
+            return;
+        }
+        const known_families = new Set(gallery_font_families);
+        for (const face of document.fonts) {
+            const family = face.family.replaceAll('"', "");
+            if (!known_families.has(family)) {
+                continue;
+            }
+            document.fonts.delete(face);
+        }
+        gallery_font_families = [];
+    }
+
+    async function ensure_gallery_font_family(font_name) {
+        const target_font_name = String(font_name ?? "").trim();
+        if (target_font_name == "") {
+            return "Linear Korean";
+        }
+        const cached_family = gallery_font_family_by_name[target_font_name];
+        if (cached_family != null && cached_family != "") {
+            return cached_family;
+        }
+        if (typeof document == "undefined") {
+            return "Linear Korean";
+        }
+        const font_data = await invoke("get_font_data", {
+            fontName: target_font_name,
+        });
+        if (!Array.isArray(font_data) || font_data.length == 0) {
+            throw new Error(`Gallery font '${target_font_name}' is empty.`);
+        }
+
+        const family = `LinearKoreanGalleryFont${Object.keys(gallery_font_family_by_name).length + 1}`;
+        remove_font_faces_by_family(family);
+        const font_face = new FontFace(family, new Uint8Array(font_data));
+        await font_face.load();
+        document.fonts.add(font_face);
+
+        gallery_font_families = Array.from(
+            new Set([...gallery_font_families, family]),
+        );
+        gallery_font_family_by_name = {
+            ...gallery_font_family_by_name,
+            [target_font_name]: family,
+        };
+        return family;
+    }
+
+    async function get_gallery_toolset_details(font_name) {
+        const target_font_name = String(font_name ?? "").trim();
+        if (target_font_name == "") {
+            return {
+                has_matching_toolset: false,
+                config_data: "",
+                kerning_data: "",
+            };
+        }
+        const cached = gallery_toolset_details_by_font[target_font_name];
+        if (cached !== undefined) {
+            return cached;
+        }
+        if (!tool_set_names.includes(target_font_name)) {
+            const empty_details = {
+                has_matching_toolset: false,
+                config_data: "",
+                kerning_data: "",
+            };
+            gallery_toolset_details_by_font = {
+                ...gallery_toolset_details_by_font,
+                [target_font_name]: empty_details,
+            };
+            return empty_details;
+        }
+
+        const tool_set_data = await invoke("get_tool_set_data", {
+            toolSetName: target_font_name,
+        });
+        const [config_data, kerning_data] = await Promise.all([
+            invoke("get_config_data", {
+                configName: String(tool_set_data?.config_name ?? ""),
+            }),
+            invoke("get_kerning_data", {
+                kerningName: String(tool_set_data?.kerning_name ?? ""),
+            }),
+        ]);
+        const resolved_details = {
+            has_matching_toolset: true,
+            config_data: String(config_data ?? ""),
+            kerning_data: String(kerning_data ?? ""),
+        };
+        gallery_toolset_details_by_font = {
+            ...gallery_toolset_details_by_font,
+            [target_font_name]: resolved_details,
+        };
+        return resolved_details;
+    }
+
+    async function sync_gallery_selected_details(index = gallery_selected_rendering) {
+        if (index < 0 || index >= gallery_renderings.length) {
+            gallery_selected_config_data = "";
+            gallery_selected_kerning_data = "";
+            return;
+        }
+
+        const request_id = gallery_details_request_id + 1;
+        gallery_details_request_id = request_id;
+        const selected_font_name = String(gallery_renderings[index]?.font_name ?? "");
+        try {
+            const details = await get_gallery_toolset_details(selected_font_name);
+            if (request_id != gallery_details_request_id) {
+                return;
+            }
+            gallery_selected_config_data = details.config_data;
+            gallery_selected_kerning_data = details.kerning_data;
+            gallery_renderings = gallery_renderings.map((item, idx) => {
+                if (idx != index) {
+                    return item;
+                }
+                return {
+                    ...item,
+                    has_matching_toolset: details.has_matching_toolset,
+                };
+            });
+        } catch (e) {
+            if (request_id != gallery_details_request_id) {
+                return;
+            }
+            gallery_selected_config_data = "";
+            gallery_selected_kerning_data = "";
+            error_msg = format_error_message(e);
+            open_alert_dialog("Gallery Error", error_msg);
+        }
+    }
+
+    function choose_gallery_rendering(index) {
+        if (index < 0 || index >= gallery_renderings.length) {
+            return;
+        }
+        gallery_selected_rendering = index;
+        void sync_gallery_selected_details(index);
+    }
+
+    async function set_gallery_rendering_font(index, next_font_name) {
+        if (index < 0 || index >= gallery_renderings.length) {
+            return;
+        }
+        const target_font_name = String(next_font_name ?? "").trim();
+        if (target_font_name == "") {
+            return;
+        }
+        const has_matching_toolset = tool_set_names.includes(target_font_name);
+        gallery_renderings = gallery_renderings.map((item, idx) => {
+            if (idx != index) {
+                return item;
+            }
+            return {
+                ...item,
+                font_name: target_font_name,
+                has_matching_toolset,
+            };
+        });
+
+        try {
+            const font_family = await ensure_gallery_font_family(target_font_name);
+            gallery_renderings = gallery_renderings.map((item, idx) => {
+                if (idx != index) {
+                    return item;
+                }
+                return {
+                    ...item,
+                    font_family,
+                    render_version: Number(item?.render_version ?? 0) + 1,
+                };
+            });
+        } catch (e) {
+            error_msg = format_error_message(e);
+            open_alert_dialog("Gallery Error", error_msg);
+        }
+
+        gallery_selected_rendering = index;
+        void sync_gallery_selected_details(index);
+    }
+
+    async function open_gallery_dialog() {
+        try {
+            await get_font_names(null);
+            await get_tool_set_names(null);
+
+            clear_gallery_preview_fonts();
+            gallery_font_family_by_name = {};
+            gallery_toolset_details_by_font = {};
+            gallery_selected_config_data = "";
+            gallery_selected_kerning_data = "";
+
+            const preview_text = get_gallery_preview_text();
+            const next_renderings = [];
+            for (const font_name of fontnames) {
+                let font_family = "Linear Korean";
+                try {
+                    font_family = await ensure_gallery_font_family(font_name);
+                } catch (e) {
+                    console.warn(
+                        `[gallery] unable to load preview font '${font_name}'`,
+                        e,
+                    );
+                }
+                next_renderings.push({
+                    font_name,
+                    text: preview_text,
+                    font_family,
+                    render_version: 0,
+                    has_matching_toolset: tool_set_names.includes(font_name),
+                });
+            }
+
+            gallery_renderings = next_renderings;
+            gallery_selected_rendering = 0;
+            gallery_dialog_open = true;
+            if (next_renderings.length > 0) {
+                await sync_gallery_selected_details(0);
+            }
+        } catch (e) {
+            error_msg = format_error_message(e);
+            open_alert_dialog("Gallery Error", error_msg);
+        }
+    }
+
+    function close_gallery_dialog() {
+        gallery_details_request_id += 1;
+        gallery_dialog_open = false;
+        gallery_selected_config_data = "";
+        gallery_selected_kerning_data = "";
+        clear_gallery_preview_fonts();
+        gallery_font_family_by_name = {};
+        gallery_toolset_details_by_font = {};
     }
 
     function is_system_evolution_rendering(index) {
@@ -1890,6 +2148,14 @@
                 <button class="ui-button-secondary" onclick={open_evolution_dialog}>
                     Evolution
                 </button>
+                <button
+                    class="ui-button-secondary"
+                    onclick={open_gallery_dialog}
+                    title="Open gallery dialog"
+                    aria-label="Open gallery dialog"
+                >
+                    <Images class="h-4 w-4" />
+                </button>
                 </div>
             </div>
         </div>
@@ -2047,6 +2313,19 @@
         {copy_selected_variant_to_main_editors}
         {replace_rendering_from_base}
         {save_selected_variant_as}
+    />
+
+    <GalleryDialog
+        open={gallery_dialog_open}
+        gallery_renderings={gallery_renderings}
+        gallery_selected_rendering={gallery_selected_rendering}
+        gallery_selected_config_data={gallery_selected_config_data}
+        gallery_selected_kerning_data={gallery_selected_kerning_data}
+        gallery_font_names={fontnames}
+        bind:char_size
+        {choose_gallery_rendering}
+        {set_gallery_rendering_font}
+        {close_gallery_dialog}
     />
 </main>
 
