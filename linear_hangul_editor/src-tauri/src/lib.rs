@@ -1,6 +1,8 @@
+mod collision;
 mod compose;
 mod consts;
 mod error;
+mod evolution;
 mod file;
 mod font;
 mod glyph;
@@ -10,18 +12,87 @@ mod structs;
 use crate::compose::*;
 use crate::consts::*;
 use crate::error::*;
+use crate::evolution::{EvolutionCandidate, EvolutionCompileMode, EvolutionEngine};
 use crate::file::*;
 use crate::font::*;
 use crate::structs::*;
-use ahash::HashMap;
+use ahash::{HashMap, HashSet};
 use std::io::Read;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 use tauri::AppHandle;
 
 type KerningMap = HashMap<(u16, u16), f32>;
 
-pub fn compile(args: &Args, glyph_set: &str) -> Result<(), Error> {
+const EVOLUTION_PREVIEW_FONT_PREFIX: &str = "evolution_preview_";
+const EVOLUTION_VARIATION_COUNT: usize = 9;
+const EVOLUTION_MAX_COLLISION_ATTEMPTS: usize = 512;
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EvolvePreviewItem {
+    label: String,
+    font_name: String,
+    config_data: String,
+    kerning_data: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EvolveResponse {
+    session_id: u64,
+    generation: u64,
+    items: Vec<EvolvePreviewItem>,
+}
+
+#[derive(Debug, Clone)]
+struct EvolveSeedState {
+    config: Config,
+    kerning_data: KerningMap,
+}
+
+#[derive(Debug, Clone)]
+struct EvolveSessionState {
+    evolution_name: String,
+    config_name: String,
+    kerning_name: String,
+    root_seed: EvolveSeedState,
+    current_seeds: Vec<EvolveSeedState>,
+    generation: u64,
+}
+
+#[derive(Debug, Default)]
+struct EvolveRuntimeState {
+    next_session_id: u64,
+    sessions: std::collections::HashMap<u64, EvolveSessionState>,
+}
+
+static EVOLVE_RUNTIME_STATE: OnceLock<Mutex<EvolveRuntimeState>> = OnceLock::new();
+
+fn evolve_runtime_state() -> &'static Mutex<EvolveRuntimeState> {
+    EVOLVE_RUNTIME_STATE.get_or_init(|| Mutex::new(EvolveRuntimeState::default()))
+}
+
+pub fn compile(args: &Args, glyph_set: &str, check_collision: bool) -> Result<(), Error> {
+    compile_internal(args, glyph_set, None, check_collision)
+}
+
+pub fn compile_selected_hangul_composites(
+    args: &Args,
+    glyph_set: &str,
+    target_codepoints: &[u16],
+    check_collision: bool,
+) -> Result<(), Error> {
+    compile_internal(args, glyph_set, Some(target_codepoints), check_collision)
+}
+
+fn compile_internal(
+    args: &Args,
+    glyph_set: &str,
+    target_codepoints: Option<&[u16]>,
+    check_collision: bool,
+) -> Result<(), Error> {
     *CONFIG.write().unwrap() = args.clone();
     let font_bytes: Vec<u8>;
     if let Some(source_filename) = &args.source_filename {
@@ -38,7 +109,15 @@ pub fn compile(args: &Args, glyph_set: &str) -> Result<(), Error> {
     }
     let (mut font_tables, builder) = get_font_tables_and_builder(&font_bytes, glyph_set)?;
     make_compatibility_jamos(&mut font_tables)?;
-    generate_hangul_composite_glyphs(&mut font_tables)?;
+    if let Some(target_codepoints) = target_codepoints {
+        generate_selected_hangul_composite_glyphs(
+            &mut font_tables,
+            target_codepoints,
+            check_collision,
+        )?;
+    } else {
+        generate_hangul_composite_glyphs(&mut font_tables, check_collision)?;
+    }
     modify_maxp(&mut font_tables);
     modify_head_hhea(&mut font_tables)?;
     let font_data = build_font_data(&font_tables, builder);
@@ -64,6 +143,36 @@ pub fn compile(args: &Args, glyph_set: &str) -> Result<(), Error> {
         }));
     }
     Ok(())
+}
+
+fn collect_hangul_syllable_codepoints(content: &str) -> Vec<u16> {
+    let mut codepoints: HashSet<u16> = HashSet::default();
+    for ch in content.chars() {
+        let codepoint = ch as u32;
+        if (0xAC00..=0xD7A3).contains(&codepoint) {
+            codepoints.insert(codepoint as u16);
+        }
+    }
+    let mut codepoints: Vec<u16> = codepoints.into_iter().collect();
+    codepoints.sort_unstable();
+    codepoints
+}
+
+fn parse_jamo_type_flags(type_value: &str) -> u8 {
+    let mut flags: u8 = 0;
+    for token in type_value
+        .split(|c: char| c == ',' || c == '|' || c == '+' || c.is_whitespace())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| !v.is_empty())
+    {
+        match token.as_str() {
+            "underdot" => flags |= UNDERDOT,
+            "upperdot" => flags |= UPPERDOT,
+            "underbar" => flags |= UNDERBAR,
+            _ => {}
+        }
+    }
+    flags
 }
 
 pub fn make_woff2(args: &Args) -> Result<(), Error> {
@@ -188,39 +297,9 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
         None => None,
     };
     let target_fontname = COMPILED_FONT_NAME.to_string();
-    let cho_type_v = config.cho_type.clone();
-    let mut cho_type: u8 = 0;
-    cho_type_v.iter().for_each(|v| {
-        if v == "underdot" {
-            cho_type |= UNDERDOT;
-        } else if v == "upperdot" {
-            cho_type |= UPPERDOT;
-        } else if v == "underbar" {
-            cho_type |= UNDERBAR;
-        }
-    });
-    let jung_type_v = config.jung_type.clone();
-    let mut jung_type: u8 = 0;
-    jung_type_v.iter().for_each(|v| {
-        if v == "underdot" {
-            jung_type |= UNDERDOT;
-        } else if v == "upperdot" {
-            jung_type |= UPPERDOT;
-        } else if v == "underbar" {
-            jung_type |= UNDERBAR;
-        }
-    });
-    let jong_type_v = config.jong_type.clone();
-    let mut jong_type: u8 = 0;
-    jong_type_v.iter().for_each(|v| {
-        if v == "underdot" {
-            jong_type |= UNDERDOT;
-        } else if v == "upperdot" {
-            jong_type |= UPPERDOT;
-        } else if v == "underbar" {
-            jong_type |= UNDERBAR;
-        }
-    });
+    let cho_type: u8 = parse_jamo_type_flags(&config.cho_type);
+    let jung_type: u8 = parse_jamo_type_flags(&config.jung_type);
+    let jong_type: u8 = parse_jamo_type_flags(&config.jong_type);
     if config.cho_h_ratio.is_none() {
         config.cho_h_ratio = Some(0.0);
     }
@@ -352,8 +431,7 @@ pub fn get_args(config: &mut Config, kerning_name: &str) -> Result<Args, Error> 
     })
 }
 
-fn get_kerning_map(kerning_name: &str) -> Result<KerningMap, Error> {
-    use std::io::BufRead;
+fn parse_kerning_map_from_data(data: &str) -> Result<KerningMap, Error> {
     fn parse_kerning_char(line: &str, token: &str, column_name: &str) -> Result<u16, Error> {
         let mut chars = token.chars();
         let c = match chars.next() {
@@ -400,7 +478,6 @@ fn get_kerning_map(kerning_name: &str) -> Result<KerningMap, Error> {
             .unwrap_or(&cho_or_jong)
             .to_owned();
         if jong == 0x11bc {
-            // Composition remaps jong IEUNG to compatibility yesieung for lookup.
             jong = 0x3181;
         }
         let is_jong = jong == 0x3181 || (0x11a8..=0x11c2).contains(&jong);
@@ -415,26 +492,7 @@ fn get_kerning_map(kerning_name: &str) -> Result<KerningMap, Error> {
     }
 
     let mut m: KerningMap = HashMap::default();
-    let p = get_kerning_p(kerning_name);
-    if !p.exists() {
-        return Ok(m);
-    }
-    let f = match std::fs::File::open(&p) {
-        Ok(v) => v,
-        Err(e) => {
-            let msg = format!("Cannot open kerning file {:?}: {:?}", p, e);
-            return Err(Error::Kerning(KerningError { msg }));
-        }
-    };
-    let bf = std::io::BufReader::new(f);
-    for line in bf.lines() {
-        let line = match line {
-            Ok(v) => v,
-            Err(e) => {
-                let msg = format!("Error reading kerning file {:?}: {:?}", p, e);
-                return Err(Error::Kerning(KerningError { msg }));
-            }
-        };
+    for line in data.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -486,6 +544,21 @@ fn get_kerning_map(kerning_name: &str) -> Result<KerningMap, Error> {
         m.insert((prev, next), kern);
     }
     Ok(m)
+}
+
+fn get_kerning_map(kerning_name: &str) -> Result<KerningMap, Error> {
+    let p = get_kerning_p(kerning_name);
+    if !p.exists() {
+        return Ok(HashMap::default());
+    }
+    let data = match std::fs::read_to_string(&p) {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = format!("Error reading kerning file {:?}: {:?}", p, e);
+            return Err(Error::Kerning(KerningError { msg }));
+        }
+    };
+    parse_kerning_map_from_data(&data)
 }
 
 fn get_glyph_filename(glyph_set: &str, glyph_name: &str) -> Option<PathBuf> {
@@ -605,6 +678,635 @@ fn save_config(config_data: String, config_name: String) -> Result<(), Error> {
         return Err(Error::Config(ConfigError { msg }));
     }
     _save_config(&config_data, &config_name);
+    Ok(())
+}
+
+//
+// Evolution config
+//
+#[tauri::command]
+fn get_evolution_config_names() -> Vec<String> {
+    let mut v: Vec<String> = Vec::with_capacity(128);
+    let p = get_evolution_dir();
+    for entry in p.read_dir().unwrap() {
+        let entry = entry.unwrap();
+        let p = entry.path();
+        let ext = p.extension().and_then(|v| v.to_str()).unwrap_or_default();
+        if ext != "json5" {
+            continue;
+        }
+        let s = p.file_stem().unwrap().to_string_lossy().to_string();
+        v.push(s);
+    }
+    v.sort();
+    v
+}
+
+#[tauri::command]
+fn get_evolution_config_data(evolution_name: String) -> String {
+    let raw = get_evolution_str(&evolution_name);
+    if raw.trim().is_empty() {
+        return raw;
+    }
+    match json5::from_str::<EvolutionConfigFile>(&raw) {
+        Ok(parsed) => match serde_json::to_string_pretty(&parsed) {
+            Ok(v) => v,
+            Err(_) => raw,
+        },
+        Err(_) => raw,
+    }
+}
+
+#[tauri::command]
+fn save_evolution_config(evolution_data: String, evolution_name: String) -> Result<(), Error> {
+    let evolution_name = if evolution_name.is_empty() {
+        DEFAULT_NAME.to_string()
+    } else {
+        evolution_name
+    };
+    let parsed: EvolutionConfigFile = match json5::from_str(&evolution_data) {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = format!(
+                "Error parsing evolution config '{}': {:?}",
+                evolution_name, e
+            );
+            return Err(Error::Config(ConfigError { msg }));
+        }
+    };
+    if let Err(msg) = parsed.validate() {
+        return Err(Error::Config(ConfigError {
+            msg: format!("Invalid evolution config '{}': {}", evolution_name, msg),
+        }));
+    }
+    let formatted_data = match serde_json::to_string_pretty(&parsed) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(Error::Config(ConfigError {
+                msg: format!(
+                    "Failed to format evolution config '{}' for saving: {:?}",
+                    evolution_name, e
+                ),
+            }));
+        }
+    };
+    _save_evolution_config(&formatted_data, &evolution_name);
+    Ok(())
+}
+
+fn load_evolve_root_seed(config_name: &str, kerning_name: &str) -> Result<EvolveSeedState, Error> {
+    let config_str = get_config_str(config_name);
+    if config_str.trim().is_empty() {
+        return Err(Error::Config(ConfigError {
+            msg: format!("Config '{}' does not exist or is empty", config_name),
+        }));
+    }
+    let config: Config = match json5::from_str(&config_str) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(Error::Config(ConfigError {
+                msg: format!("Error parsing config '{}': {:?}", config_name, e),
+            }));
+        }
+    };
+    let kerning_data = get_kerning_map(kerning_name)?;
+    Ok(EvolveSeedState {
+        config,
+        kerning_data,
+    })
+}
+
+fn parse_evolve_config_data(config_data: &str) -> Result<Config, Error> {
+    match json5::from_str(config_data) {
+        Ok(v) => Ok(v),
+        Err(e) => Err(Error::Config(ConfigError {
+            msg: format!("Error parsing evolve seed config: {:?}", e),
+        })),
+    }
+}
+
+fn serialize_evolve_config_data(config: &Config) -> Result<String, Error> {
+    match serde_json::to_string_pretty(config) {
+        Ok(v) => Ok(v),
+        Err(e) => Err(Error::Config(ConfigError {
+            msg: format!("Failed to serialize evolve preview config: {:?}", e),
+        })),
+    }
+}
+
+fn serialize_evolve_kerning_data(kerning_data: &KerningMap) -> String {
+    let mut pairs: Vec<(u16, u16)> = kerning_data.keys().copied().collect();
+    pairs.sort_unstable();
+    let mut lines: Vec<String> = Vec::with_capacity(pairs.len());
+    for (prev, next) in pairs {
+        let value = match kerning_data.get(&(prev, next)) {
+            Some(v) => *v,
+            None => continue,
+        };
+        let prev_char = char::from_u32(prev as u32).unwrap_or('\u{FFFD}');
+        let next_char = char::from_u32(next as u32).unwrap_or('\u{FFFD}');
+        lines.push(format!("{},{},,{}", prev_char, next_char, value));
+    }
+    lines.join("\n")
+}
+
+fn sanitize_font_token(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut previous_was_sep = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            previous_was_sep = false;
+            continue;
+        }
+        if !previous_was_sep {
+            out.push('_');
+            previous_was_sep = true;
+        }
+    }
+    let out = out.trim_matches('_').to_string();
+    if out.is_empty() {
+        "default".to_string()
+    } else {
+        out
+    }
+}
+
+fn evolution_preview_font_name(evolution_name: &str, slot_index: usize) -> String {
+    format!(
+        "{}{}_evo_{}",
+        EVOLUTION_PREVIEW_FONT_PREFIX,
+        sanitize_font_token(evolution_name),
+        slot_index + 1
+    )
+}
+
+fn cleanup_evolution_preview_fonts() {
+    let fonts_dir = get_fonts_dir();
+    let entries = match fonts_dir.read_dir() {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let metadata = match entry.metadata() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if !metadata.is_dir() {
+            continue;
+        }
+        let font_name = entry.file_name().to_string_lossy().to_string();
+        if !font_name.starts_with(EVOLUTION_PREVIEW_FONT_PREFIX) {
+            continue;
+        }
+        let _ = delete_font_dir(&font_name);
+    }
+}
+
+#[tauri::command]
+fn evolve(
+    evolution_name: String,
+    config_name: String,
+    kerning_name: String,
+    glyph_set: String,
+    content: String,
+    check_collision: bool,
+    session_id: Option<u64>,
+    seed_index: Option<usize>,
+    reset_to_root: Option<bool>,
+    seed_config_data: Option<String>,
+    seed_kerning_data: Option<String>,
+) -> Result<EvolveResponse, Error> {
+    let evolution_name = if evolution_name.is_empty() {
+        DEFAULT_NAME.to_string()
+    } else {
+        evolution_name
+    };
+    let config_name = if config_name.is_empty() {
+        DEFAULT_NAME.to_string()
+    } else {
+        config_name
+    };
+    let kerning_name = if kerning_name.is_empty() {
+        DEFAULT_NAME.to_string()
+    } else {
+        kerning_name
+    };
+    let reset_to_root = reset_to_root.unwrap_or(false);
+
+    let mut resolved_session_id = session_id;
+    let existing_session = if let Some(id) = session_id {
+        let runtime = evolve_runtime_state().lock().unwrap();
+        match runtime.sessions.get(&id) {
+            Some(session)
+                if session.evolution_name == evolution_name
+                    && session.config_name == config_name
+                    && session.kerning_name == kerning_name =>
+            {
+                Some(session.clone())
+            }
+            _ => {
+                resolved_session_id = None;
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let mut session = match existing_session {
+        Some(v) => v,
+        None => EvolveSessionState {
+            evolution_name: evolution_name.clone(),
+            config_name: config_name.clone(),
+            kerning_name: kerning_name.clone(),
+            root_seed: load_evolve_root_seed(&config_name, &kerning_name)?,
+            current_seeds: Vec::new(),
+            generation: 0,
+        },
+    };
+    let base_seed = if reset_to_root {
+        session.root_seed.clone()
+    } else if let Some(idx) = seed_index {
+        session
+            .current_seeds
+            .get(idx)
+            .cloned()
+            .unwrap_or_else(|| session.root_seed.clone())
+    } else if let Some(seed) = session.current_seeds.first() {
+        seed.clone()
+    } else {
+        session.root_seed.clone()
+    };
+    let mut base_seed = base_seed;
+    if let Some(config_data) = seed_config_data {
+        if !config_data.trim().is_empty() {
+            base_seed.config = parse_evolve_config_data(&config_data)?;
+        }
+    }
+    if let Some(kerning_data) = seed_kerning_data {
+        if !kerning_data.trim().is_empty() {
+            base_seed.kerning_data = parse_kerning_map_from_data(&kerning_data)?;
+        } else {
+            base_seed.kerning_data = HashMap::default();
+        }
+    }
+    let next_generation = session.generation + 1;
+    let mut engine = EvolutionEngine::load_from_file(&evolution_name, None)?;
+
+    cleanup_evolution_preview_fonts();
+
+    let mut items: Vec<EvolvePreviewItem> = Vec::with_capacity(EVOLUTION_VARIATION_COUNT + 1);
+    let original_font_name = evolution_preview_font_name(&evolution_name, 0);
+    let original_candidate = EvolutionCandidate {
+        generation: 0,
+        config: base_seed.config.clone(),
+        kerning_data: base_seed.kerning_data.clone(),
+    };
+    engine.generate_font_for_mutation(
+        &original_candidate,
+        &glyph_set,
+        EvolutionCompileMode::Fast {
+            content: content.clone(),
+        },
+        check_collision,
+        &original_font_name,
+    )?;
+    items.push(EvolvePreviewItem {
+        label: "Original".to_string(),
+        font_name: original_font_name,
+        config_data: serialize_evolve_config_data(&base_seed.config)?,
+        kerning_data: serialize_evolve_kerning_data(&base_seed.kerning_data),
+    });
+    let mut next_seeds: Vec<EvolveSeedState> = Vec::with_capacity(EVOLUTION_VARIATION_COUNT + 1);
+    next_seeds.push(base_seed.clone());
+
+    let mut accepted_candidates: Vec<EvolutionCandidate> =
+        Vec::with_capacity(EVOLUTION_VARIATION_COUNT);
+    let mut attempts: usize = 0;
+    while accepted_candidates.len() < EVOLUTION_VARIATION_COUNT {
+        attempts += 1;
+        if check_collision && attempts > EVOLUTION_MAX_COLLISION_ATTEMPTS {
+            return Err(Error::Collision(CollisionError {
+                msg: format!(
+                    "Could not generate {} collision-free evolution variants after {} attempts",
+                    EVOLUTION_VARIATION_COUNT, attempts
+                ),
+                debug: None,
+            }));
+        }
+
+        let candidate = engine.mutate_once(&base_seed.config, &base_seed.kerning_data)?;
+        let mutation_index = accepted_candidates.len() + 1;
+        let mutation_font_name = evolution_preview_font_name(&evolution_name, mutation_index);
+        match engine.generate_font_for_mutation(
+            &candidate,
+            &glyph_set,
+            EvolutionCompileMode::Fast {
+                content: content.clone(),
+            },
+            check_collision,
+            &mutation_font_name,
+        ) {
+            Ok(()) => {
+                next_seeds.push(EvolveSeedState {
+                    config: candidate.config.clone(),
+                    kerning_data: candidate.kerning_data.clone(),
+                });
+                accepted_candidates.push(candidate);
+                let last_seed = next_seeds.last().unwrap();
+                items.push(EvolvePreviewItem {
+                    label: format!("Mutation {} · G{}", mutation_index, next_generation),
+                    font_name: mutation_font_name,
+                    config_data: serialize_evolve_config_data(&last_seed.config)?,
+                    kerning_data: serialize_evolve_kerning_data(&last_seed.kerning_data),
+                });
+            }
+            Err(Error::Collision(_)) if check_collision => {
+                continue;
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        }
+    }
+
+    if let Some(last_candidate) = accepted_candidates.last() {
+        engine.save_checkpoint_last(last_candidate)?;
+    }
+
+    session.current_seeds = next_seeds;
+    session.generation = next_generation;
+
+    let final_session_id = {
+        let mut runtime = evolve_runtime_state().lock().unwrap();
+        let id = match resolved_session_id {
+            Some(v) => v,
+            None => {
+                runtime.next_session_id = runtime.next_session_id.saturating_add(1);
+                if runtime.next_session_id == 0 {
+                    runtime.next_session_id = 1;
+                }
+                runtime.next_session_id
+            }
+        };
+        runtime.sessions.insert(id, session);
+        if runtime.sessions.len() > 16 {
+            if let Some(old_id) = runtime.sessions.keys().copied().filter(|v| *v != id).min() {
+                runtime.sessions.remove(&old_id);
+            }
+        }
+        id
+    };
+
+    Ok(EvolveResponse {
+        session_id: final_session_id,
+        generation: next_generation,
+        items,
+    })
+}
+
+#[tauri::command]
+fn evolve_replace_variant(
+    evolution_name: String,
+    config_name: String,
+    kerning_name: String,
+    glyph_set: String,
+    content: String,
+    check_collision: bool,
+    base_config_data: String,
+    base_kerning_data: String,
+    target_index: usize,
+    generation: u64,
+) -> Result<EvolvePreviewItem, Error> {
+    let evolution_name = if evolution_name.is_empty() {
+        DEFAULT_NAME.to_string()
+    } else {
+        evolution_name
+    };
+    let config_name = if config_name.is_empty() {
+        DEFAULT_NAME.to_string()
+    } else {
+        config_name
+    };
+    let kerning_name = if kerning_name.is_empty() {
+        DEFAULT_NAME.to_string()
+    } else {
+        kerning_name
+    };
+
+    let root_seed = load_evolve_root_seed(&config_name, &kerning_name)?;
+    let base_config = if base_config_data.trim().is_empty() {
+        root_seed.config.clone()
+    } else {
+        parse_evolve_config_data(&base_config_data)?
+    };
+    let base_kerning = if base_kerning_data.trim().is_empty() {
+        root_seed.kerning_data.clone()
+    } else {
+        parse_kerning_map_from_data(&base_kerning_data)?
+    };
+    let base_seed = EvolveSeedState {
+        config: base_config,
+        kerning_data: base_kerning,
+    };
+
+    let mut engine = EvolutionEngine::load_from_file(&evolution_name, None)?;
+    let mut attempts: usize = 0;
+    loop {
+        attempts += 1;
+        if check_collision && attempts > EVOLUTION_MAX_COLLISION_ATTEMPTS {
+            return Err(Error::Collision(CollisionError {
+                msg: format!(
+                    "Could not generate a collision-free replacement variant after {} attempts",
+                    attempts
+                ),
+                debug: None,
+            }));
+        }
+
+        let candidate = engine.mutate_once(&base_seed.config, &base_seed.kerning_data)?;
+        let font_name = evolution_preview_font_name(&evolution_name, target_index);
+        match engine.generate_font_for_mutation(
+            &candidate,
+            &glyph_set,
+            EvolutionCompileMode::Fast {
+                content: content.clone(),
+            },
+            check_collision,
+            &font_name,
+        ) {
+            Ok(()) => {
+                let label = if target_index == 0 {
+                    format!("Original · G{}", generation)
+                } else {
+                    format!("Mutation {} · G{}", target_index, generation)
+                };
+                return Ok(EvolvePreviewItem {
+                    label,
+                    font_name,
+                    config_data: serialize_evolve_config_data(&candidate.config)?,
+                    kerning_data: serialize_evolve_kerning_data(&candidate.kerning_data),
+                });
+            }
+            Err(Error::Collision(_)) if check_collision => {
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+#[tauri::command]
+fn evolve_render_variant(
+    evolution_name: String,
+    config_name: String,
+    kerning_name: String,
+    glyph_set: String,
+    content: String,
+    check_collision: bool,
+    render_config_data: String,
+    render_kerning_data: String,
+    target_index: usize,
+    generation: u64,
+    label: Option<String>,
+) -> Result<EvolvePreviewItem, Error> {
+    let evolution_name = if evolution_name.is_empty() {
+        DEFAULT_NAME.to_string()
+    } else {
+        evolution_name
+    };
+    let config_name = if config_name.is_empty() {
+        DEFAULT_NAME.to_string()
+    } else {
+        config_name
+    };
+    let kerning_name = if kerning_name.is_empty() {
+        DEFAULT_NAME.to_string()
+    } else {
+        kerning_name
+    };
+
+    let root_seed = load_evolve_root_seed(&config_name, &kerning_name)?;
+    let render_config = if render_config_data.trim().is_empty() {
+        root_seed.config.clone()
+    } else {
+        parse_evolve_config_data(&render_config_data)?
+    };
+    let render_kerning = parse_kerning_map_from_data(&render_kerning_data)?;
+
+    let engine = EvolutionEngine::load_from_file(&evolution_name, None)?;
+    let font_name = evolution_preview_font_name(&evolution_name, target_index);
+    let candidate = EvolutionCandidate {
+        generation,
+        config: render_config,
+        kerning_data: render_kerning,
+    };
+    eprintln!(
+        "[evolution][render-backend] target_index={} generation={} font_name='{}' source={:?} glyph_width={:?} space_width={:?} space_width_ratio={:?}",
+        target_index,
+        generation,
+        font_name,
+        candidate.config.source,
+        candidate.config.glyph_width,
+        candidate.config.space_width,
+        candidate.config.space_width_ratio
+    );
+    engine.generate_font_for_mutation(
+        &candidate,
+        &glyph_set,
+        EvolutionCompileMode::Fast { content },
+        check_collision,
+        &font_name,
+    )?;
+
+    let resolved_label = label.unwrap_or_else(|| {
+        if target_index == 0 {
+            format!("Original · G{}", generation)
+        } else {
+            format!("Mutation {} · G{}", target_index, generation)
+        }
+    });
+    Ok(EvolvePreviewItem {
+        label: resolved_label,
+        font_name,
+        config_data: serialize_evolve_config_data(&candidate.config)?,
+        kerning_data: serialize_evolve_kerning_data(&candidate.kerning_data),
+    })
+}
+
+#[tauri::command]
+fn save_evolution_variant_as(
+    save_name: String,
+    glyph_set: String,
+    config_data: String,
+    kerning_data: String,
+    check_collision: bool,
+) -> Result<(), Error> {
+    let save_name = save_name.trim().to_string();
+    if save_name.is_empty() {
+        return Err(Error::Config(ConfigError {
+            msg: "Save name is empty".to_string(),
+        }));
+    }
+    let source_glyph_set = glyph_set.trim().to_string();
+    if source_glyph_set.is_empty() {
+        return Err(Error::Config(ConfigError {
+            msg: "Glyph set is empty".to_string(),
+        }));
+    }
+
+    let mut config = parse_evolve_config_data(&config_data)?;
+    let kerning_map = parse_kerning_map_from_data(&kerning_data)?;
+
+    let config_json = match serde_json::to_string_pretty(&config) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(Error::Config(ConfigError {
+                msg: format!("Failed to serialize config for '{}': {:?}", save_name, e),
+            }));
+        }
+    };
+    _save_config(&config_json, &save_name);
+
+    let kerning_serialized = serialize_evolve_kerning_data(&kerning_map);
+    let kerning_path = get_kerning_p(&save_name);
+    let mut kerning_file = match std::fs::File::create(&kerning_path) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(Error::Kerning(KerningError {
+                msg: format!("Failed to create kerning file {:?}: {:?}", kerning_path, e),
+            }));
+        }
+    };
+    if let Err(e) = kerning_file.write_all(kerning_serialized.as_bytes()) {
+        return Err(Error::Kerning(KerningError {
+            msg: format!("Failed to write kerning file {:?}: {:?}", kerning_path, e),
+        }));
+    }
+
+    if source_glyph_set != save_name {
+        copy_glyph_set(source_glyph_set.clone(), save_name.clone());
+    }
+
+    save_tool_set(
+        ToolSet {
+            config_name: save_name.clone(),
+            kerning_name: save_name.clone(),
+            glyph_set: save_name.clone(),
+        },
+        save_name.clone(),
+    );
+
+    let mut args = get_args(&mut config, &save_name)?;
+    args.target_fontname = save_name.clone();
+    let font_dir = get_font_dir(&save_name);
+    if font_dir.exists() {
+        delete_font_dir(&save_name)?;
+    }
+    compile(&args, &save_name, check_collision)?;
+    make_woff2(&args)?;
+    copy_config_kern_glyph_files(&save_name, &save_name, &save_name, &save_name);
+
     Ok(())
 }
 
@@ -860,6 +1562,7 @@ fn run_compile(
     config_name: String,
     kerning_name: String,
     glyph_set: String,
+    check_collision: bool,
 ) -> Result<(), Error> {
     use tauri::Emitter;
     let config_name: String = if config_name.is_empty() {
@@ -891,7 +1594,7 @@ fn run_compile(
                     }));
                 }
             }
-            compile(&args, &glyph_set)?;
+            compile(&args, &glyph_set, check_collision)?;
             make_woff2(&args)?;
             copy_config_kern_glyph_files(
                 COMPILED_FONT_NAME,
@@ -906,6 +1609,97 @@ fn run_compile(
                 let _ = app.emit("msg", "compile_ended");
             }
             Ok(Err(e)) => {
+                if let Error::Collision(CollisionError {
+                    debug: Some(debug), ..
+                }) = &e
+                {
+                    let _ = app.emit("collision_debug", debug);
+                }
+                let _ = app.emit("error", format!("{:?}", e));
+            }
+            Err(panic_payload) => {
+                let panic_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                    (*s).to_string()
+                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic payload".to_string()
+                };
+                let _ = app.emit(
+                    "error",
+                    format!("Unexpected panic while compiling glyphs: {}", panic_msg),
+                );
+            }
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn run_compile_content(
+    app: AppHandle,
+    config_name: String,
+    kerning_name: String,
+    glyph_set: String,
+    content: String,
+    check_collision: bool,
+) -> Result<(), Error> {
+    use tauri::Emitter;
+    let config_name: String = if config_name.is_empty() {
+        DEFAULT_NAME.to_string()
+    } else {
+        config_name.clone()
+    };
+    let config_str = get_config_str(&config_name);
+    let mut config = match json5::from_str(&config_str) {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = format!("Error in parsing config: {:#?}\n{:#?}", e, config_str);
+            return Err(Error::Config(ConfigError { msg }));
+        }
+    };
+    let args = get_args(&mut config, &kerning_name)?;
+    *CONFIG.write().unwrap() = args.clone();
+    let _ = std::thread::spawn(move || {
+        let compile_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let font_dir = get_font_dir(COMPILED_FONT_NAME);
+            if font_dir.exists() {
+                if let Err(e) = delete_font_dir(COMPILED_FONT_NAME) {
+                    return Err(Error::Font(FontError {
+                        msg: format!(
+                            "Error deleting existing font '{}': {:?}",
+                            COMPILED_FONT_NAME, e
+                        ),
+                    }));
+                }
+            }
+            let target_codepoints = collect_hangul_syllable_codepoints(&content);
+            compile_selected_hangul_composites(
+                &args,
+                &glyph_set,
+                &target_codepoints,
+                check_collision,
+            )?;
+            make_woff2(&args)?;
+            copy_config_kern_glyph_files(
+                COMPILED_FONT_NAME,
+                &config_name,
+                &kerning_name,
+                &glyph_set,
+            );
+            Ok::<(), Error>(())
+        }));
+        match compile_result {
+            Ok(Ok(())) => {
+                let _ = app.emit("msg", "compile_ended");
+            }
+            Ok(Err(e)) => {
+                if let Error::Collision(CollisionError {
+                    debug: Some(debug), ..
+                }) = &e
+                {
+                    let _ = app.emit("collision_debug", debug);
+                }
                 let _ = app.emit("error", format!("{:?}", e));
             }
             Err(panic_payload) => {
@@ -945,6 +1739,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             run_compile,
+            run_compile_content,
             // toolset
             get_tool_set_names,
             get_tool_set_data,
@@ -961,6 +1756,14 @@ pub fn run() {
             get_config_names,
             get_config_data,
             save_config,
+            // evolution config
+            get_evolution_config_names,
+            get_evolution_config_data,
+            save_evolution_config,
+            evolve,
+            evolve_replace_variant,
+            evolve_render_variant,
+            save_evolution_variant_as,
             // kerning
             get_kerning_names,
             get_kerning_data,

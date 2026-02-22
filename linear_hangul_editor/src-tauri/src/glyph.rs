@@ -1,5 +1,6 @@
 use std::io::Read;
 
+use crate::collision::CollisionChecker;
 use crate::compose::add_components;
 use crate::compose::get_first_chosung_component_bbox;
 use crate::consts::*;
@@ -74,18 +75,24 @@ pub fn get_glyph_curves(
                 lua.globals().set("X_HEIGHT", args.x_height).unwrap();
                 lua.globals().set("CAP_HEIGHT", args.cap_height).unwrap();
             } else {
+                // A ratio of 0 means "full height" for Cho glyphs.
+                let cho_h_ratio = if args.cho_h_ratio == 0.0 {
+                    1.0
+                } else {
+                    args.cho_h_ratio
+                };
                 lua.globals().set("BASELINE", args.baseline).unwrap();
                 lua.globals()
                     .set(
                         "X_HEIGHT",
-                        ((args.x_height - args.baseline) as f32 * args.cho_h_ratio) as i16
+                        ((args.x_height - args.baseline) as f32 * cho_h_ratio) as i16
                             + args.baseline,
                     )
                     .unwrap();
                 lua.globals()
                     .set(
                         "CAP_HEIGHT",
-                        ((args.cap_height - args.baseline) as f32 * args.cho_h_ratio) as i16
+                        ((args.cap_height - args.baseline) as f32 * cho_h_ratio) as i16
                             + args.baseline,
                     )
                     .unwrap();
@@ -209,9 +216,7 @@ pub fn create_glyphs(glyph_set: &str) -> Result<HashMap<u16, Glyph>, Error> {
     lua.globals().set("CAP_HEIGHT", args.cap_height).unwrap();
     lua.globals().set("MIN_GAP", args.min_gap).unwrap();
     let mut m: HashMap<u16, Glyph> = HashMap::default();
-    if args.space_width.is_some() {
-        m.insert(32, Glyph::Empty);
-    }
+    m.insert(32, Glyph::Empty);
     let glyph_names = [
         ("bieub", 0x1107, 0x11b8),
         ("chieuch", 0x110e, 0x11be),
@@ -527,7 +532,7 @@ pub fn get_glyph_x_y_advance_sidebearing(
     let h_metric = &font_tables.hmtx.h_metrics
         [std::cmp::min(glyph_id as usize, font_tables.hmtx.h_metrics.len() - 1)];
     match glyph {
-        Glyph::Empty => Ok((0, 0, 0, 0, 0, 0)),
+        Glyph::Empty => Ok((0, 0, 0, 0, h_metric.advance, h_metric.side_bearing)),
         Glyph::Simple(g) => Ok((
             g.bbox.x_min,
             g.bbox.x_max,
@@ -554,6 +559,7 @@ pub fn make_glyph(
     jungsung_codepoints: &[u16],
     jongsung_codepoints: &[u16],
     do_not_add_char_gap: bool,
+    collision_checker: Option<&mut CollisionChecker>,
 ) -> Result<(), Error> {
     let args = &*CONFIG.read().unwrap();
     let mut y_min: i16 = 0;
@@ -612,6 +618,28 @@ pub fn make_glyph(
     glyph.bbox.x_max = x_max;
     glyph.bbox.y_min = y_min;
     glyph.bbox.y_max = y_max;
+    if let Some(collision_checker) = collision_checker {
+        if let Some(raster_debug) =
+            collision_checker.composite_collision_debug(&*font_tables, &glyph)?
+        {
+            let target_char = std::char::from_u32(target_codepoint as u32).unwrap_or('?');
+            let msg = format!(
+                "Curve collision detected while composing syllable '{}'",
+                target_char
+            );
+            return Err(Error::Collision(CollisionError {
+                msg,
+                debug: Some(CollisionDebugPayload {
+                    character: target_char.to_string(),
+                    width: raster_debug.width,
+                    height: raster_debug.height,
+                    component_a: raster_debug.component_a,
+                    component_b: raster_debug.component_b,
+                    overlap: raster_debug.overlap,
+                }),
+            }));
+        }
+    }
     let new_glyph_id = font_tables.glyphs.len() as u16;
     font_tables
         .codepoint_to_glyph_id

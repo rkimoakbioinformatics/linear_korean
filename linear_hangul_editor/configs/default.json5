@@ -1,8 +1,8 @@
 {
   "source": null,
-  "cho_type": [],
-  "jung_type": [],
-  "jong_type": [],
+  "cho_type": "",
+  "jung_type": "",
+  "jong_type": "",
   "cho_h_ratio": 0.3,
   jung_w_ratio: 0.6,
   "jung_h_ratio": 1.0,

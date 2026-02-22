@@ -1,3 +1,4 @@
+use crate::collision::CollisionChecker;
 use crate::consts::*;
 use crate::error::*;
 use crate::glyph::*;
@@ -23,6 +24,23 @@ use write_fonts::validate::Validate;
 use write_fonts::FontBuilder;
 use write_fonts::OffsetMarker;
 
+fn resolve_space_advance(args: &Args) -> u16 {
+    match args.space_width {
+        Some(v) => v,
+        None => {
+            let advance = args.space_width_ratio * args.glyph_width as f32;
+            if !advance.is_finite() || advance <= 0.0 {
+                return 0;
+            }
+            if advance >= u16::MAX as f32 {
+                u16::MAX
+            } else {
+                advance as u16
+            }
+        }
+    }
+}
+
 pub fn collect_glyphs(
     font: Option<FontRef>,
     font_tables: &mut FontTables,
@@ -30,6 +48,7 @@ pub fn collect_glyphs(
 ) -> Result<(), Error> {
     let args = &*CONFIG.read().unwrap();
     let glyph_width = args.glyph_width;
+    let space_glyph_id = font_tables.codepoint_to_glyph_id.get(&32).copied();
     let loca_format = font_tables.head.index_to_loc_format;
     let (glyf_marker, loca_marker) = if let Some(ref font) = font {
         (
@@ -40,6 +59,23 @@ pub fn collect_glyphs(
         (None, None)
     };
     for glyph_id in 0..font_tables.maxp.num_glyphs as usize {
+        if space_glyph_id == Some(glyph_id as u16) {
+            if let Some(space_glyph) = created_glyphs.get(&32) {
+                let advance = resolve_space_advance(args);
+                eprintln!(
+                    "[font][space] target_font='{}' branch=space_glyph_id glyph_id={} advance={} explicit_space_width={:?} space_width_ratio={} glyph_width={}",
+                    args.target_fontname,
+                    glyph_id,
+                    advance,
+                    args.space_width,
+                    args.space_width_ratio,
+                    args.glyph_width
+                );
+                font_tables.hmtx.h_metrics[glyph_id].advance = advance;
+                font_tables.glyphs.push(space_glyph.clone());
+                continue;
+            }
+        }
         let mut codepoint: u16 = u16::MAX;
         for (c, gid) in font_tables.codepoint_to_glyph_id.iter() {
             if *gid == glyph_id as u16 {
@@ -49,8 +85,18 @@ pub fn collect_glyphs(
         }
         if created_glyphs.contains_key(&codepoint) {
             let g = created_glyphs.get(&codepoint).unwrap();
-            if codepoint == 32 && args.space_width.is_some() {
-                font_tables.hmtx.h_metrics[glyph_id].advance = args.space_width.unwrap();
+            if codepoint == 32 {
+                let advance = resolve_space_advance(args);
+                eprintln!(
+                    "[font][space] target_font='{}' branch=codepoint_lookup glyph_id={} advance={} explicit_space_width={:?} space_width_ratio={} glyph_width={}",
+                    args.target_fontname,
+                    glyph_id,
+                    advance,
+                    args.space_width,
+                    args.space_width_ratio,
+                    args.glyph_width
+                );
+                font_tables.hmtx.h_metrics[glyph_id].advance = advance;
                 font_tables.glyphs.push(g.clone());
                 continue;
             }
@@ -107,6 +153,9 @@ pub fn collect_glyphs(
                             .push(write_fonts::tables::glyf::Glyph::Composite(write_glyph));
                     }
                 }
+            } else if glyph_id == 0 {
+                // Keep glyph ID 0 reserved for .notdef when building from scratch.
+                font_tables.glyphs.push(Glyph::Empty);
             } else {
                 let msg = format!("No glyph for codepoint: {:x}", codepoint);
                 return Err(Error::Glyph(GlyphError { msg }));
@@ -117,41 +166,78 @@ pub fn collect_glyphs(
     Ok(())
 }
 
-pub fn generate_hangul_composite_glyphs(font_tables: &mut FontTables) -> Result<(), Error> {
+pub fn generate_hangul_composite_glyphs(
+    font_tables: &mut FontTables,
+    check_collision: bool,
+) -> Result<(), Error> {
+    let code_no_start: u16 = 0xac00;
+    let code_no_end: u16 = 0xd7a3;
+    let target_codepoints: Vec<u16> = (code_no_start..(code_no_end + 1)).collect();
+    generate_selected_hangul_composite_glyphs(font_tables, &target_codepoints, check_collision)
+}
+
+pub fn generate_selected_hangul_composite_glyphs(
+    font_tables: &mut FontTables,
+    target_codepoints: &[u16],
+    check_collision: bool,
+) -> Result<(), Error> {
+    let mut collision_checker = if check_collision {
+        let args = &*CONFIG.read().unwrap();
+        Some(CollisionChecker::new(args.glyph_width, None)?)
+    } else {
+        None
+    };
+    for target_codepoint in target_codepoints {
+        generate_single_hangul_composite_glyph(
+            font_tables,
+            *target_codepoint,
+            collision_checker.as_mut(),
+        )?;
+    }
+    Ok(())
+}
+
+fn generate_single_hangul_composite_glyph(
+    font_tables: &mut FontTables,
+    target_codepoint: u16,
+    collision_checker: Option<&mut CollisionChecker>,
+) -> Result<(), Error> {
     let cho_start: u16 = 0x1100;
     let jung_start: u16 = 0x1161;
     let jong_start: u16 = 0x11a7;
     let code_no_start: u16 = 0xac00;
     let code_no_end: u16 = 0xd7a3;
-    for target_codepoint in code_no_start..(code_no_end + 1) {
-        let code_offset = target_codepoint - code_no_start;
-        let jong_offset = code_offset % 28;
-        let jung_offset = (code_offset / 28) % 21;
-        let cho_offset = (code_offset / 28) / 21;
-        let cho_code_no = cho_start + cho_offset;
-        let jung_code_no = jung_start + jung_offset;
-        let jong_code_no = jong_start + jong_offset;
-        let chosung_codepoints = CHO_CONVERSION_TABLE
-            .get(&cho_code_no)
-            .map(|v| v.clone())
-            .unwrap_or_else(|| vec![cho_code_no]);
-        let jungsung_codepoints = JUNG_CONVERSION_TABLE
-            .get(&jung_code_no)
-            .map(|v| v.clone())
-            .unwrap_or_else(|| vec![jung_code_no]);
-        let jongsung_codepoints = JONG_CONVERSION_TABLE
-            .get(&jong_code_no)
-            .map(|v| v.clone())
-            .unwrap_or_else(|| vec![jong_code_no]);
-        make_glyph(
-            font_tables,
-            target_codepoint,
-            &chosung_codepoints,
-            &jungsung_codepoints,
-            &jongsung_codepoints,
-            false,
-        )?;
+    if target_codepoint < code_no_start || target_codepoint > code_no_end {
+        return Ok(());
     }
+    let code_offset = target_codepoint - code_no_start;
+    let jong_offset = code_offset % 28;
+    let jung_offset = (code_offset / 28) % 21;
+    let cho_offset = (code_offset / 28) / 21;
+    let cho_code_no = cho_start + cho_offset;
+    let jung_code_no = jung_start + jung_offset;
+    let jong_code_no = jong_start + jong_offset;
+    let chosung_codepoints = CHO_CONVERSION_TABLE
+        .get(&cho_code_no)
+        .map(|v| v.clone())
+        .unwrap_or_else(|| vec![cho_code_no]);
+    let jungsung_codepoints = JUNG_CONVERSION_TABLE
+        .get(&jung_code_no)
+        .map(|v| v.clone())
+        .unwrap_or_else(|| vec![jung_code_no]);
+    let jongsung_codepoints = JONG_CONVERSION_TABLE
+        .get(&jong_code_no)
+        .map(|v| v.clone())
+        .unwrap_or_else(|| vec![jong_code_no]);
+    make_glyph(
+        font_tables,
+        target_codepoint,
+        &chosung_codepoints,
+        &jungsung_codepoints,
+        &jongsung_codepoints,
+        false,
+        collision_checker,
+    )?;
     Ok(())
 }
 
@@ -278,41 +364,54 @@ pub fn handle_no_source(
     created_glyphs: &HashMap<u16, Glyph>,
     created_codepoints: &Vec<u16>,
 ) {
-    let num_glyphs = created_glyphs.len();
+    // Reserve glyph ID 0 for .notdef, then assign generated glyphs from ID 1.
+    let num_glyphs = created_glyphs.len() + 1;
     font_tables.post.num_glyphs = Some(num_glyphs as u16);
-    let mut glyph_name_idxs: Vec<u16> = Vec::with_capacity(num_glyphs);
-    let mut glyph_names: Vec<String> = Vec::with_capacity(num_glyphs);
-    let mut glyph_name_idx: u16 = 0;
-    let mut end_code: Vec<u16> = Vec::new();
-    let mut start_code: Vec<u16> = Vec::new();
+    let mut end_code: Vec<u16> = Vec::with_capacity(num_glyphs + 1);
+    let mut start_code: Vec<u16> = Vec::with_capacity(num_glyphs + 1);
     let mut id_delta: Vec<i16> = Vec::new();
-    let mut id_range_offsets: Vec<u16> = Vec::new();
+    let mut id_range_offsets: Vec<u16> = Vec::with_capacity(num_glyphs + 1);
     let glyph_id_array: Vec<u16> = Vec::new();
-    for codepoint in created_codepoints.iter() {
-        if *codepoint <= 257 {
-            glyph_name_idxs.push(*codepoint);
-        } else {
-            glyph_name_idxs.push(glyph_name_idx + 258);
-            glyph_names.push(format!("uni{:x}", codepoint));
-            glyph_name_idx += 1;
-        }
-        if end_code.is_empty() {
-            end_code.push(*codepoint);
-            start_code.push(*codepoint);
-            id_delta.push(glyph_name_idx as i16 - 1 - *codepoint as i16);
-            id_range_offsets.push(0);
-        } else {
-            let idx = end_code.len() - 1;
-            if *codepoint == end_code[idx] + 1 {
-                end_code[idx] = *codepoint;
-            } else {
-                end_code.push(*codepoint);
-                start_code.push(*codepoint);
-                id_delta.push(glyph_name_idx as i16 - 1 - *codepoint as i16);
-                id_range_offsets.push(0);
+
+    let mut run_start_codepoint: Option<u16> = None;
+    let mut run_start_glyph_id: u16 = 0;
+    let mut run_end_codepoint: u16 = 0;
+
+    for (glyph_index, codepoint) in created_codepoints.iter().enumerate() {
+        let glyph_id = glyph_index as u16 + 1;
+        let codepoint = *codepoint;
+        match run_start_codepoint {
+            None => {
+                run_start_codepoint = Some(codepoint);
+                run_start_glyph_id = glyph_id;
+                run_end_codepoint = codepoint;
+            }
+            Some(start_codepoint) => {
+                if codepoint == run_end_codepoint + 1 {
+                    run_end_codepoint = codepoint;
+                } else {
+                    start_code.push(start_codepoint);
+                    end_code.push(run_end_codepoint);
+                    id_delta.push(run_start_glyph_id.wrapping_sub(start_codepoint) as i16);
+                    id_range_offsets.push(0);
+                    run_start_codepoint = Some(codepoint);
+                    run_start_glyph_id = glyph_id;
+                    run_end_codepoint = codepoint;
+                }
             }
         }
     }
+    if let Some(start_codepoint) = run_start_codepoint {
+        start_code.push(start_codepoint);
+        end_code.push(run_end_codepoint);
+        id_delta.push(run_start_glyph_id.wrapping_sub(start_codepoint) as i16);
+        id_range_offsets.push(0);
+    }
+    // Required terminal segment for cmap format 4.
+    start_code.push(0xFFFF);
+    end_code.push(0xFFFF);
+    id_delta.push(1);
+    id_range_offsets.push(0);
 
     //font_tables.post = write_fonts::tables::post::Post::new_v2(glyph_name_strs);
     font_tables.post = write_fonts::tables::post::Post::new(
@@ -604,14 +703,30 @@ pub fn get_font_tables_and_builder<'a>(
         handle_no_source(&mut font_tables, &created_glyphs, &created_codepoints);
         font_o = None;
         modify_maxp_with_simple_glyphs(&mut font_tables.maxp, &created_glyphs);
-        for (glyph_id, codepoint) in created_codepoints.iter().enumerate() {
+        font_tables.hmtx.h_metrics.push(LongMetric {
+            // Width of .notdef is intentionally neutral and independent from space.
+            advance: args.glyph_width.max(0) as u16,
+            side_bearing: 0,
+        });
+        for (glyph_index, codepoint) in created_codepoints.iter().enumerate() {
+            let glyph_id = glyph_index as u16 + 1;
             font_tables
                 .codepoint_to_glyph_id
-                .insert(*codepoint, glyph_id as u16);
+                .insert(*codepoint, glyph_id);
             let glyph = created_glyphs.get(codepoint).unwrap();
-            if *codepoint == 32 && args.space_width.is_some() {
+            if *codepoint == 32 {
+                let advance = resolve_space_advance(args);
+                eprintln!(
+                    "[font][space] target_font='{}' branch=no_source_hmtx glyph_id={} advance={} explicit_space_width={:?} space_width_ratio={} glyph_width={}",
+                    args.target_fontname,
+                    glyph_id,
+                    advance,
+                    args.space_width,
+                    args.space_width_ratio,
+                    args.glyph_width
+                );
                 font_tables.hmtx.h_metrics.push(LongMetric {
-                    advance: args.space_width.unwrap(),
+                    advance,
                     side_bearing: 0,
                 });
                 continue;
@@ -629,7 +744,7 @@ pub fn get_font_tables_and_builder<'a>(
 }
 
 pub fn modify_maxp_with_simple_glyphs(maxp: &mut Maxp, glyphs: &HashMap<u16, Glyph>) {
-    let num_glyphs = glyphs.len() as u16;
+    let num_glyphs = glyphs.len() as u16 + 1;
     maxp.num_glyphs = num_glyphs;
     let mut max_points: u16 = 0;
     let mut max_contours: u16 = 0;
@@ -776,9 +891,15 @@ pub fn build_font_data(font_tables: &FontTables, mut builder: FontBuilder) -> Ve
     for glyph in font_tables.glyphs.iter() {
         gl_builder.add_glyph(glyph).unwrap();
     }
-    let (glyf, loca, _loca_format) = gl_builder.build();
+    let (glyf, loca, loca_format) = gl_builder.build();
+    let mut head = font_tables.head.clone();
+    head.index_to_loc_format = if loca_format == write_fonts::tables::loca::LocaFormat::Long {
+        1
+    } else {
+        0
+    };
     glyf.validate().unwrap();
-    font_tables.head.validate().unwrap();
+    head.validate().unwrap();
     font_tables.cmap.validate().unwrap();
     font_tables.hhea.validate().unwrap();
     font_tables.hmtx.validate().unwrap();
@@ -787,7 +908,7 @@ pub fn build_font_data(font_tables: &FontTables, mut builder: FontBuilder) -> Ve
     font_tables.name.validate().unwrap();
     font_tables.post.validate().unwrap();
     builder.add_table(&glyf).unwrap();
-    builder.add_table(&font_tables.head).unwrap();
+    builder.add_table(&head).unwrap();
     builder.add_table(&font_tables.cmap).unwrap();
     builder.add_table(&font_tables.hhea).unwrap();
     builder.add_table(&font_tables.hmtx).unwrap();

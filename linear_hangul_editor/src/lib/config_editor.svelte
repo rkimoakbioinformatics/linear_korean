@@ -41,6 +41,14 @@
         code_editor_ref?.focusEditor();
     }
 
+    export function setConfigData(next_config_data) {
+        config_data = String(next_config_data ?? "");
+    }
+
+    export function getConfigData() {
+        return config_data;
+    }
+
     export async function save(event, next_config_name = null) {
         const target_config_name =
             next_config_name == null ? config_name : next_config_name.trim();

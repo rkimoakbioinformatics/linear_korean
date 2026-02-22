@@ -9,6 +9,7 @@ pub static CONFIGS_DIRNAME: &str = "configs";
 pub static CONTENTS_DIRNAME: &str = "contents";
 pub static KERNINGS_DIRNAME: &str = "kernings";
 pub static GLYPH_SETS_DIRNAME: &str = "glyph_sets";
+pub static EVOLUTION_DIRNAME: &str = "evolution";
 pub static FONTS_DIRNAME: &str = "fonts";
 pub static DEFAULT_NAME: &str = "default";
 pub static COMPILED_FONT_NAME: &str = "generated";

@@ -75,6 +75,7 @@ pub fn create_data_folders(app: &AppHandle) -> Result<(), Error> {
         GLYPH_SETS_DIRNAME,
         CONFIGS_DIRNAME,
         KERNINGS_DIRNAME,
+        EVOLUTION_DIRNAME,
         FONTS_DIRNAME,
         CONTENTS_DIRNAME,
         TOOLSETS_DIRNAME,
@@ -266,7 +267,6 @@ pub fn delete_font_dir(font_name: &str) -> Result<(), Error> {
     if p.exists() {
         std::fs::remove_dir_all(&p).unwrap();
     }
-    println!("parent: {:?}", parent);
     match std::fs::remove_dir(&parent) {
         Ok(_) => Ok(()),
         Err(e) => Err(Error::Font(FontError {
@@ -341,6 +341,62 @@ pub fn _save_config(config_data: &str, config_name: &str) {
     let p = get_config_p(config_name);
     let mut f = std::fs::File::create(&p).unwrap();
     f.write_all(config_data.as_bytes()).unwrap();
+}
+
+//
+// Evolution
+//
+pub fn get_evolution_dir() -> PathBuf {
+    let mut p = get_root_dir();
+    p.push(EVOLUTION_DIRNAME);
+    p
+}
+
+pub fn get_evolution_p(evolution_name: &str) -> PathBuf {
+    let evolution_name = if evolution_name.is_empty() {
+        DEFAULT_NAME
+    } else {
+        evolution_name
+    };
+    let mut p = get_evolution_dir();
+    p.push(format!("{}.json5", evolution_name));
+    p
+}
+
+pub fn get_evolution_str(evolution_name: &str) -> String {
+    let p = get_evolution_p(evolution_name);
+    if !p.exists() {
+        return String::new();
+    }
+    let mut f = match std::fs::File::open(&p) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("warning: cannot open evolution config {:?}: {:?}", p, e);
+            return String::new();
+        }
+    };
+    let mut s1 = String::new();
+    if let Err(e) = f.read_to_string(&mut s1) {
+        eprintln!("warning: cannot read evolution config {:?}: {:?}", p, e);
+        return String::new();
+    }
+    let s1 = s1.replace(r"“", "\"");
+    let s1 = s1.replace("'", "\"");
+    s1
+}
+
+pub fn _save_evolution_config(evolution_data: &str, evolution_name: &str) {
+    if evolution_data.is_empty() {
+        return;
+    }
+    let evolution_name = if evolution_name.is_empty() {
+        DEFAULT_NAME
+    } else {
+        evolution_name
+    };
+    let p = get_evolution_p(evolution_name);
+    let mut f = std::fs::File::create(&p).unwrap();
+    f.write_all(evolution_data.as_bytes()).unwrap();
 }
 
 //

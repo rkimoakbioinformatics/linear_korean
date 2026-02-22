@@ -46,6 +46,14 @@
         code_editor_ref?.focusEditor();
     }
 
+    export function setKerningData(next_kerning_data) {
+        kerning_data = String(next_kerning_data ?? "");
+    }
+
+    export function getKerningData() {
+        return kerning_data;
+    }
+
     function sort_kerning_rows(event) {
         kerning_data = sort_kerning_text(kerning_data);
     }

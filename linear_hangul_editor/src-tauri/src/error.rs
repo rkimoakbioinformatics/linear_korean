@@ -3,6 +3,7 @@ pub enum Error {
     Glyph(GlyphError),
     Font(FontError),
     Kerning(KerningError),
+    Collision(CollisionError),
 }
 
 pub struct ConfigError {
@@ -21,6 +22,21 @@ pub struct KerningError {
     pub msg: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+pub struct CollisionDebugPayload {
+    pub character: String,
+    pub width: u32,
+    pub height: u32,
+    pub component_a: Vec<[u32; 2]>,
+    pub component_b: Vec<[u32; 2]>,
+    pub overlap: Vec<[u32; 2]>,
+}
+
+pub struct CollisionError {
+    pub msg: String,
+    pub debug: Option<CollisionDebugPayload>,
+}
+
 impl serde::Serialize for Error {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -31,6 +47,7 @@ impl serde::Serialize for Error {
             Error::Glyph(GlyphError { msg }) => serializer.serialize_str(msg),
             Error::Font(FontError { msg }) => serializer.serialize_str(msg),
             Error::Kerning(KerningError { msg }) => serializer.serialize_str(msg),
+            Error::Collision(CollisionError { msg, .. }) => serializer.serialize_str(msg),
         }
     }
 }
@@ -42,6 +59,7 @@ impl std::fmt::Debug for Error {
             Error::Glyph(GlyphError { msg }) => write!(f, "{}", msg),
             Error::Font(FontError { msg }) => write!(f, "{}", msg),
             Error::Kerning(KerningError { msg }) => write!(f, "{}", msg),
+            Error::Collision(CollisionError { msg, .. }) => write!(f, "{}", msg),
         }
     }
 }
