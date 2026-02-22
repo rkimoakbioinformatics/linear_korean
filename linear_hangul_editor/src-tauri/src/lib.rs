@@ -1517,9 +1517,6 @@ fn get_kerning_data(kerning_name: String) -> String {
 
 #[tauri::command]
 fn save_kerning_data(kerning_data: String, kerning_name: String) {
-    if kerning_data.is_empty() {
-        return;
-    }
     let p = get_kerning_p(&kerning_name);
     let mut f = std::fs::File::create(&p).unwrap();
     f.write_all(kerning_data.as_bytes()).unwrap();

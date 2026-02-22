@@ -2,7 +2,7 @@
     // @ts-nocheck
     import { invoke } from "@tauri-apps/api/core";
     import { listen } from "@tauri-apps/api/event";
-    import { onMount } from "svelte";
+    import { onMount, tick } from "svelte";
     import { Menu, Submenu, PredefinedMenuItem } from "@tauri-apps/api/menu";
     import JSON5 from "json5";
     import {
@@ -54,6 +54,7 @@
     let save_prompt_title = $state("");
     let save_prompt_value = $state("");
     let save_prompt_resolve = null;
+    let save_prompt_input_ref = $state(null);
 
     let alert_dialog_open = $state(false);
     let alert_dialog_title = $state("Error");
@@ -1221,6 +1222,12 @@
         save_prompt_title = title;
         save_prompt_value = initial_value;
         save_prompt_open = true;
+        void tick().then(() => {
+            if (save_prompt_input_ref) {
+                save_prompt_input_ref.focus();
+                save_prompt_input_ref.select();
+            }
+        });
         return new Promise((resolve) => {
             save_prompt_resolve = resolve;
         });
@@ -1960,6 +1967,7 @@
                 <div class="text-sm font-semibold">{save_prompt_title}</div>
                 <input
                     class="ui-input mt-3 w-full"
+                    bind:this={save_prompt_input_ref}
                     bind:value={save_prompt_value}
                     onkeydown={(event) => {
                         if (event.key == "Enter") {
