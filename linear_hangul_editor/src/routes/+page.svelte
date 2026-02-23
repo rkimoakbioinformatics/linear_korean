@@ -87,6 +87,8 @@
     let gallery_font_family_by_name = $state({});
     let gallery_toolset_details_by_font = $state({});
     let gallery_details_request_id = 0;
+    let gallery_persisted_card_fonts = $state([]);
+    let gallery_persisted_selected_index = $state(0);
 
     let theme_mode = $state("light");
     let should_persist_ui_state = false;
@@ -99,6 +101,7 @@
         tool_set_name: "tool_set_name",
         theme_mode: "theme_mode",
         collision_check_enabled: "collision_check_enabled",
+        gallery_state: "gallery_state",
     };
 
     function apply_theme_mode(next_theme_mode) {
@@ -164,6 +167,29 @@
             String(collision_check_enabled),
         );
         collision_check_enabled = collision_check_value != "false";
+
+        const gallery_state_raw = await get_setting_or_default(
+            UI_SETTING_KEYS.gallery_state,
+            "",
+        );
+        try {
+            const parsed = JSON.parse(String(gallery_state_raw ?? ""));
+            const parsed_card_fonts = Array.isArray(parsed?.card_fonts)
+                ? parsed.card_fonts
+                : [];
+            gallery_persisted_card_fonts = parsed_card_fonts
+                .map((item) => String(item ?? "").trim())
+                .filter((item) => item != "");
+            const parsed_selected_index = Number(parsed?.selected_index ?? 0);
+            gallery_persisted_selected_index =
+                Number.isInteger(parsed_selected_index) &&
+                parsed_selected_index >= 0
+                    ? parsed_selected_index
+                    : 0;
+        } catch (_) {
+            gallery_persisted_card_fonts = [];
+            gallery_persisted_selected_index = 0;
+        }
     }
 
     $effect(() => {
@@ -196,6 +222,22 @@
             UI_SETTING_KEYS.collision_check_enabled,
             String(collision_check_enabled),
         );
+    });
+
+    $effect(() => {
+        const card_fonts = gallery_renderings
+            .map((item) => String(item?.font_name ?? "").trim())
+            .filter((item) => item != "");
+        const payload = JSON.stringify({
+            version: 1,
+            card_fonts: card_fonts,
+            selected_index:
+                Number.isInteger(gallery_selected_rendering) &&
+                gallery_selected_rendering >= 0
+                    ? gallery_selected_rendering
+                    : 0,
+        });
+        void save_ui_setting(UI_SETTING_KEYS.gallery_state, payload);
     });
 
     $effect(() => {
@@ -607,11 +649,14 @@
         void sync_gallery_selected_details(index);
     }
 
-    async function open_gallery_dialog() {
+    async function refresh_gallery_dialog() {
         try {
             await get_font_names(null);
             await get_tool_set_names(null);
 
+            const previous_selected_font_name = String(
+                gallery_renderings[gallery_selected_rendering]?.font_name ?? "",
+            );
             clear_gallery_preview_fonts();
             gallery_font_family_by_name = {};
             gallery_toolset_details_by_font = {};
@@ -638,13 +683,104 @@
                     has_matching_toolset: tool_set_names.includes(font_name),
                 });
             }
-
             gallery_renderings = next_renderings;
-            gallery_selected_rendering = 0;
-            gallery_dialog_open = true;
-            if (next_renderings.length > 0) {
-                await sync_gallery_selected_details(0);
+
+            const preferred_index = next_renderings.findIndex(
+                (item) => item.font_name == previous_selected_font_name,
+            );
+            gallery_selected_rendering = preferred_index >= 0 ? preferred_index : 0;
+            if (gallery_renderings.length > 0) {
+                await sync_gallery_selected_details(gallery_selected_rendering);
             }
+            gallery_persisted_card_fonts = gallery_renderings
+                .map((item) => String(item?.font_name ?? "").trim())
+                .filter((item) => item != "");
+            gallery_persisted_selected_index = gallery_selected_rendering;
+        } catch (e) {
+            error_msg = format_error_message(e);
+            open_alert_dialog("Gallery Error", error_msg);
+        }
+    }
+
+    async function open_gallery_dialog() {
+        try {
+            await get_font_names(null);
+            await get_tool_set_names(null);
+
+            if (gallery_renderings.length == 0) {
+                const available_font_names = Array.isArray(fontnames)
+                    ? fontnames.map((item) => String(item ?? "").trim()).filter((item) => item != "")
+                    : [];
+                const available_set = new Set(available_font_names);
+                const restored_card_fonts = gallery_persisted_card_fonts.filter(
+                    (item) => available_set.has(item),
+                );
+                const initial_card_fonts =
+                    restored_card_fonts.length > 0
+                        ? restored_card_fonts
+                        : available_font_names;
+
+                clear_gallery_preview_fonts();
+                gallery_font_family_by_name = {};
+                gallery_toolset_details_by_font = {};
+                gallery_selected_config_data = "";
+                gallery_selected_kerning_data = "";
+
+                const preview_text = get_gallery_preview_text();
+                const next_renderings = [];
+                for (const font_name of initial_card_fonts) {
+                    let font_family = "Linear Korean";
+                    try {
+                        font_family = await ensure_gallery_font_family(font_name);
+                    } catch (e) {
+                        console.warn(
+                            `[gallery] unable to load preview font '${font_name}'`,
+                            e,
+                        );
+                    }
+                    next_renderings.push({
+                        font_name,
+                        text: preview_text,
+                        font_family,
+                        render_version: 0,
+                        has_matching_toolset: tool_set_names.includes(font_name),
+                    });
+                }
+                gallery_renderings = next_renderings;
+                if (restored_card_fonts.length > 0) {
+                    gallery_selected_rendering = Math.min(
+                        Math.max(gallery_persisted_selected_index, 0),
+                        Math.max(next_renderings.length - 1, 0),
+                    );
+                } else {
+                    gallery_selected_rendering = 0;
+                }
+            } else {
+                gallery_renderings = gallery_renderings.map((item) => ({
+                    ...item,
+                    has_matching_toolset: tool_set_names.includes(
+                        String(item?.font_name ?? ""),
+                    ),
+                }));
+                if (
+                    gallery_selected_rendering < 0 ||
+                    gallery_selected_rendering >= gallery_renderings.length
+                ) {
+                    gallery_selected_rendering = 0;
+                }
+            }
+
+            gallery_dialog_open = true;
+            if (gallery_renderings.length > 0) {
+                await sync_gallery_selected_details(gallery_selected_rendering);
+            } else {
+                gallery_selected_config_data = "";
+                gallery_selected_kerning_data = "";
+            }
+            gallery_persisted_card_fonts = gallery_renderings
+                .map((item) => String(item?.font_name ?? "").trim())
+                .filter((item) => item != "");
+            gallery_persisted_selected_index = gallery_selected_rendering;
         } catch (e) {
             error_msg = format_error_message(e);
             open_alert_dialog("Gallery Error", error_msg);
@@ -654,11 +790,6 @@
     function close_gallery_dialog() {
         gallery_details_request_id += 1;
         gallery_dialog_open = false;
-        gallery_selected_config_data = "";
-        gallery_selected_kerning_data = "";
-        clear_gallery_preview_fonts();
-        gallery_font_family_by_name = {};
-        gallery_toolset_details_by_font = {};
     }
 
     function is_system_evolution_rendering(index) {
@@ -2361,6 +2492,7 @@
         {choose_gallery_rendering}
         {set_gallery_rendering_font}
         {reorder_gallery_renderings}
+        {refresh_gallery_dialog}
         {close_gallery_dialog}
     />
 </main>

@@ -1,6 +1,6 @@
 <script>
     // @ts-nocheck
-    import { X } from "lucide-svelte";
+    import { RefreshCcw, X } from "lucide-svelte";
 
     let {
         open = false,
@@ -13,6 +13,7 @@
         choose_gallery_rendering = () => {},
         set_gallery_rendering_font = () => {},
         reorder_gallery_renderings = () => {},
+        refresh_gallery_dialog = () => {},
         close_gallery_dialog = () => {},
     } = $props();
 
@@ -107,14 +108,24 @@
         <div class="ui-card flex h-[92vh] w-full max-w-[96rem] min-h-0 flex-col p-3">
             <div class="flex items-center justify-between gap-3 border-b border-[hsl(var(--border))] pb-3">
                 <div class="text-sm font-semibold">Gallery</div>
-                <button
-                    class="ui-button-ghost"
-                    onclick={close_gallery_dialog}
-                    title="Close gallery dialog"
-                    aria-label="Close gallery dialog"
-                >
-                    <X class="h-4 w-4" />
-                </button>
+                <div class="flex items-center gap-2">
+                    <button
+                        class="ui-button-ghost"
+                        onclick={refresh_gallery_dialog}
+                        title="Refresh gallery"
+                        aria-label="Refresh gallery"
+                    >
+                        <RefreshCcw class="h-4 w-4" />
+                    </button>
+                    <button
+                        class="ui-button-ghost"
+                        onclick={close_gallery_dialog}
+                        title="Close gallery dialog"
+                        aria-label="Close gallery dialog"
+                    >
+                        <X class="h-4 w-4" />
+                    </button>
+                </div>
             </div>
 
             <div class="grid min-h-0 flex-1 grid-cols-[18rem_minmax(0,1fr)] gap-3 pt-3">
