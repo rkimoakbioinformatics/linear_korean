@@ -110,6 +110,12 @@
             <div class="flex items-center justify-between gap-3 border-b border-[hsl(var(--border))] pb-3">
                 <div class="text-sm font-semibold">Gallery</div>
                 <div class="flex items-center gap-2">
+                    <select class="ui-select h-8 min-w-[5.5rem]" bind:value={char_size}>
+                        <option value="16">16</option>
+                        <option value="24">24</option>
+                        <option value="48">48</option>
+                        <option value="64">64</option>
+                    </select>
                     <button
                         class="ui-button-ghost"
                         onclick={delete_selected_gallery_card_assets}
