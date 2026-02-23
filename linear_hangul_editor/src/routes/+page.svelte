@@ -531,6 +531,41 @@
         void sync_gallery_selected_details(index);
     }
 
+    function reorder_gallery_renderings(from_index, to_index) {
+        if (
+            from_index < 0 ||
+            to_index < 0 ||
+            from_index >= gallery_renderings.length ||
+            to_index >= gallery_renderings.length ||
+            from_index == to_index
+        ) {
+            return;
+        }
+
+        const next_renderings = [...gallery_renderings];
+        const [moved] = next_renderings.splice(from_index, 1);
+        if (moved == null) {
+            return;
+        }
+        next_renderings.splice(to_index, 0, moved);
+        gallery_renderings = next_renderings;
+
+        if (gallery_selected_rendering == from_index) {
+            gallery_selected_rendering = to_index;
+        } else if (
+            from_index < gallery_selected_rendering &&
+            gallery_selected_rendering <= to_index
+        ) {
+            gallery_selected_rendering -= 1;
+        } else if (
+            to_index <= gallery_selected_rendering &&
+            gallery_selected_rendering < from_index
+        ) {
+            gallery_selected_rendering += 1;
+        }
+        void sync_gallery_selected_details(gallery_selected_rendering);
+    }
+
     async function set_gallery_rendering_font(index, next_font_name) {
         if (index < 0 || index >= gallery_renderings.length) {
             return;
@@ -2325,6 +2360,7 @@
         bind:char_size
         {choose_gallery_rendering}
         {set_gallery_rendering_font}
+        {reorder_gallery_renderings}
         {close_gallery_dialog}
     />
 </main>
