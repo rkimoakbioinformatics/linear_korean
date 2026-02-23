@@ -654,9 +654,28 @@
             await get_font_names(null);
             await get_tool_set_names(null);
 
+            const previous_selected_index = gallery_selected_rendering;
             const previous_selected_font_name = String(
-                gallery_renderings[gallery_selected_rendering]?.font_name ?? "",
+                gallery_renderings[previous_selected_index]?.font_name ?? "",
             );
+            const available_font_names = Array.isArray(fontnames)
+                ? fontnames
+                      .map((item) => String(item ?? "").trim())
+                      .filter((item) => item != "")
+                : [];
+            const available_set = new Set(available_font_names);
+            const existing_card_fonts = gallery_renderings
+                .map((item) => String(item?.font_name ?? "").trim())
+                .filter((item) => item != "");
+            const kept_card_fonts = existing_card_fonts.filter((item) =>
+                available_set.has(item),
+            );
+            const kept_font_set = new Set(kept_card_fonts);
+            const appended_new_fonts = available_font_names.filter(
+                (item) => !kept_font_set.has(item),
+            );
+            const next_card_fonts = [...kept_card_fonts, ...appended_new_fonts];
+
             clear_gallery_preview_fonts();
             gallery_font_family_by_name = {};
             gallery_toolset_details_by_font = {};
@@ -665,7 +684,7 @@
 
             const preview_text = get_gallery_preview_text();
             const next_renderings = [];
-            for (const font_name of fontnames) {
+            for (const font_name of next_card_fonts) {
                 let font_family = "Linear Korean";
                 try {
                     font_family = await ensure_gallery_font_family(font_name);
@@ -685,12 +704,33 @@
             }
             gallery_renderings = next_renderings;
 
-            const preferred_index = next_renderings.findIndex(
-                (item) => item.font_name == previous_selected_font_name,
-            );
-            gallery_selected_rendering = preferred_index >= 0 ? preferred_index : 0;
+            let next_selected_index = 0;
+            if (next_renderings.length > 0) {
+                if (previous_selected_font_name != "") {
+                    const preferred_index = next_renderings.findIndex(
+                        (item) => item.font_name == previous_selected_font_name,
+                    );
+                    if (preferred_index >= 0) {
+                        next_selected_index = preferred_index;
+                    } else {
+                        next_selected_index = Math.min(
+                            Math.max(previous_selected_index, 0),
+                            next_renderings.length - 1,
+                        );
+                    }
+                } else {
+                    next_selected_index = Math.min(
+                        Math.max(previous_selected_index, 0),
+                        next_renderings.length - 1,
+                    );
+                }
+            }
+            gallery_selected_rendering = next_selected_index;
             if (gallery_renderings.length > 0) {
                 await sync_gallery_selected_details(gallery_selected_rendering);
+            } else {
+                gallery_selected_config_data = "";
+                gallery_selected_kerning_data = "";
             }
             gallery_persisted_card_fonts = gallery_renderings
                 .map((item) => String(item?.font_name ?? "").trim())
@@ -699,6 +739,64 @@
         } catch (e) {
             error_msg = format_error_message(e);
             open_alert_dialog("Gallery Error", error_msg);
+        }
+    }
+
+    function is_missing_resource_error(error) {
+        const message = format_error_message(error).toLowerCase();
+        return (
+            message.includes("not found") ||
+            message.includes("does not exist") ||
+            message.includes("no such")
+        );
+    }
+
+    async function delete_selected_gallery_card_assets() {
+        if (
+            gallery_selected_rendering < 0 ||
+            gallery_selected_rendering >= gallery_renderings.length
+        ) {
+            return;
+        }
+        const target_name = String(
+            gallery_renderings[gallery_selected_rendering]?.font_name ?? "",
+        ).trim();
+        if (target_name == "") {
+            return;
+        }
+
+        const warnings = [];
+        try {
+            await invoke("delete_tool_set", {
+                toolSetName: target_name,
+            });
+        } catch (e) {
+            if (!is_missing_resource_error(e)) {
+                warnings.push(
+                    `Toolset '${target_name}': ${format_error_message(e)}`,
+                );
+            }
+        }
+
+        try {
+            await invoke("delete_font", {
+                fontName: target_name,
+            });
+        } catch (e) {
+            if (!is_missing_resource_error(e)) {
+                warnings.push(
+                    `Font '${target_name}': ${format_error_message(e)}`,
+                );
+            }
+        }
+
+        await refresh_gallery_dialog();
+        await get_tool_set_names(null);
+        if (warnings.length > 0) {
+            open_alert_dialog(
+                "Gallery Delete Warning",
+                warnings.join("\n\n"),
+            );
         }
     }
 
@@ -2493,6 +2591,7 @@
         {set_gallery_rendering_font}
         {reorder_gallery_renderings}
         {refresh_gallery_dialog}
+        {delete_selected_gallery_card_assets}
         {close_gallery_dialog}
     />
 </main>

@@ -1,6 +1,6 @@
 <script>
     // @ts-nocheck
-    import { RefreshCcw, X } from "lucide-svelte";
+    import { RefreshCcw, Trash2, X } from "lucide-svelte";
 
     let {
         open = false,
@@ -14,6 +14,7 @@
         set_gallery_rendering_font = () => {},
         reorder_gallery_renderings = () => {},
         refresh_gallery_dialog = () => {},
+        delete_selected_gallery_card_assets = () => {},
         close_gallery_dialog = () => {},
     } = $props();
 
@@ -109,6 +110,14 @@
             <div class="flex items-center justify-between gap-3 border-b border-[hsl(var(--border))] pb-3">
                 <div class="text-sm font-semibold">Gallery</div>
                 <div class="flex items-center gap-2">
+                    <button
+                        class="ui-button-ghost"
+                        onclick={delete_selected_gallery_card_assets}
+                        title="Delete selected card font and toolset"
+                        aria-label="Delete selected card font and toolset"
+                    >
+                        <Trash2 class="h-4 w-4" />
+                    </button>
                     <button
                         class="ui-button-ghost"
                         onclick={refresh_gallery_dialog}
